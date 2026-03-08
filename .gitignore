@@ -1,0 +1,13 @@
+/.vscode
+/pub_image.py
+/README.md
+build/
+install/
+log/
+CMakeCache.txt
+CMakeFiles/
+Makefile
+*.o
+*.so
+*.a
+*.out
