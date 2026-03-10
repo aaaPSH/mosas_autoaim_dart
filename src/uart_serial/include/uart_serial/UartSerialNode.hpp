@@ -3,30 +3,50 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <serial/serial.h>
+#include <vector>
 #include "autoaim_interfaces/msg/green_dot.hpp"
+#include "uart_serial/ScrewPid.hpp" 
 
-namespace uart_serial
-{
-class UartSerialNode : public rclcpp::Node
-{
+namespace uart_serial {
+class UartSerialNode : public rclcpp::Node {
 public:
     explicit UartSerialNode(const rclcpp::NodeOptions & options);
+    bool send_command(double speed, bool fire);
     ~UartSerialNode();
 
 private:
-    // 视觉数据回调函数
     void green_dots_callback(const autoaim_interfaces::msg::GreenDot::SharedPtr msg);
+    
+    rcl_interfaces::msg::SetParametersResult parameters_callback(
+        const std::vector<rclcpp::Parameter> & parameters);
 
-    // ROS 2 订阅者与串口对象
     rclcpp::Subscription<autoaim_interfaces::msg::GreenDot>::SharedPtr green_dots_sub_;
     serial::Serial serial_;
 
-    // =============== 核心状态机变量 ===============
-    bool has_locked_before_ = false;  // 是否曾成功锁定目标
-    int lost_count_ = 0;              // 连续丢帧计数器
-    int16_t last_valid_yaw_ = 0;      // 上一帧有效的 Yaw (放大100倍后)
-    int16_t last_valid_pitch_ = 0;    // 上一帧有效的 Pitch (放大100倍后)
-};
-} // namespace uart_serial
+    OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 
-#endif  // UART_SERIAL_NODE_HPP_
+    enum class AimState { TRACKING, VERIFYING, LOCKED };
+    AimState current_state_ = AimState::TRACKING;
+    std::vector<double> history_x_;
+
+    int lost_frames_count_ = 0;
+    int16_t last_valid_speed_ = 0;
+
+    const int SCALE = 100;
+    const int MAX_LOST_TOLERANCE = 5;
+    const size_t VERIFY_FRAMES = 5; // 修改为 size_t 以消除警告
+
+    // 【修复】统一类名为 ScrewPID
+    ScrewPID my_pid_{0.8, 0.1, 0.05, 5.0, 100.0}; 
+
+    struct {
+        double Kp; double Ki; double Kd;
+        double max_speed; double deadzone;
+    } pid_params_;
+
+    rclcpp::Time last_time_;
+    rclcpp::Duration dt = rclcpp::Duration::from_seconds(0); 
+    bool first_run_ = true;
+};
+} 
+#endif // UART_SERIAL_NODE_HPP_

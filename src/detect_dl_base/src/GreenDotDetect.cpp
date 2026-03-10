@@ -232,6 +232,14 @@ bool GreenDotDetect::detect(const cv::Mat &raw_image, std::vector<Dot> &dots, bo
         // 坐标映射回原图分辨率 (x2)
         dot.center.x = (strip_roi.x + r.x + local_sub_center.x) * 2.0 + 0.5;
         dot.center.y = (strip_roi.y + r.y + local_sub_center.y) * 2.0 + 0.5;
+
+        std::vector<cv::Point2f> srcPoints;
+        srcPoints.push_back(dot.center);
+        std::vector<cv::Point2f> dstPoints;
+        // 使用内参去畸变点，计算物理平面坐标
+        cv::undistortPoints(srcPoints, dstPoints, cameraMatrix, distCoeffs, cv::noArray(), cameraMatrix);
+        
+        dot.center = dstPoints[0];
         dot.roi = cv::Rect((strip_roi.x + r.x)*2, (strip_roi.y + r.y)*2, r.width*2, r.height*2);
         dot.area = area*4;
         dots.push_back(dot);
@@ -338,16 +346,9 @@ bool GreenDotDetect::detect(const cv::Mat &raw_image, std::vector<Dot> &dots, bo
 
 bool GreenDotDetect::calculate_dots_yaw(std::vector<Dot> &dots) {
     if (dots.empty()) return false;
-    std::vector<cv::Point2f> srcPoints;
-    for (const auto &dot : dots) srcPoints.push_back(dot.center);
-    
-    std::vector<cv::Point2f> dstPoints;
-    // 使用内参去畸变点，计算物理平面坐标
-    cv::undistortPoints(srcPoints, dstPoints, cameraMatrix, distCoeffs, cv::noArray(), cv::noArray());
-    
     for (size_t i = 0; i < dots.size(); ++i) {
         // atan(x) 得到的是归一化平面上的角度 (Assuming z=1)
-        dots[i].yaw = std::atan(dstPoints[i].x) * (180.0 / CV_PI) + params.yaw_offset;
+        dots[i].yaw = std::atan((dots[i].center.x - cameraMatrix.at<double>(0, 2)) / cameraMatrix.at<double>(0, 0)) * (180.0 / CV_PI)  + params.yaw_offset;
     }
     return true;
 }

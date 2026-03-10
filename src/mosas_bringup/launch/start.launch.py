@@ -24,6 +24,14 @@ def generate_launch_description():
             'base_detect.yaml'
         )
     )
+    serial_params_file = LaunchConfiguration(
+        "serial_params_file",
+        default=os.path.join(
+            get_package_share_directory('mosas_bringup'),
+            'config',
+            'serial_params.yaml'
+        )
+    )
 
     container = ComposableNodeContainer(
         name="autoaim",
@@ -55,6 +63,7 @@ def generate_launch_description():
                 package="uart_serial",
                 plugin="uart_serial::UartSerialNode",
                 name="uart_serial_node",
+                parameters=[serial_params_file],
                 extra_arguments=[{"use_intra_process_comms": True}],
             )
             # ComposableNode(

@@ -322,6 +322,7 @@ rcl_interfaces::msg::SetParametersResult parametersCallback(
             target.x = d.center.x;
             target.y = d.center.y;
             target.angle_yaw = d.yaw;
+            target.d_pixel = target.x - camera_matrix_.at<double>(0, 2);
 
             target_pub -> publish(target);
         }else if(!found){
@@ -331,7 +332,6 @@ rcl_interfaces::msg::SetParametersResult parametersCallback(
             target.header.frame_id = msg->header.frame_id;
             target.x = -1;
             target.y =-1;
-            target.angle_yaw = -1;
 
             target_pub -> publish(target);
         }
