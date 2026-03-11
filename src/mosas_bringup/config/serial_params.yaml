@@ -1,14 +1,15 @@
-ros__parameters:
-  # 串口通信配置
-  port_name: "/dev/ttyUSB0"    # 串口设备路径
-  baud_rate: 115200            # 串口波特率
-  debug_level: 1               # 调试级别
+uart_serial_node:
+  ros__parameters:
+    # 串口通信配置
+    port_name: "/dev/ttyUSB0"    # 串口设备路径
+    baud_rate: 115200            # 串口波特率
+    debug_level: 1               # 调试级别
 
-  # PID 控制器参数
-  Kp: 0.01                     # 比例系数 (默认值 0.01)
-  Ki: 0.0                      # 积分系数 (默认值 0.0)
-  Kd: 0.0                      # 微分系数 (默认值 0.0)
+    # PID 控制器参数
+    Kp: 0.01                     # 比例系数 (默认值 0.01)
+    Ki: 0.0                      # 积分系数 (默认值 0.0)
+    Kd: 0.0                      # 微分系数 (默认值 0.0)
 
-  # 运动限制与死区
-  max_speed: 100.0             # 最大输出速度限制
-  deadzone: 1.0                # 误差死区像素宽度
+    # 运动限制与死区
+    max_speed: 100.0             # 最大输出速度限制
+    deadzone: 1.0                # 误差死区像素宽度
