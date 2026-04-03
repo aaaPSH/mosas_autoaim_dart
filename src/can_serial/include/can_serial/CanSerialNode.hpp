@@ -30,9 +30,7 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
   
   std::unique_ptr<CanSerial> can_core_;
-  //void parse_received_data();
-
-  //serial::Serial serial_;
+  void parse_received_data();
 
   OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 

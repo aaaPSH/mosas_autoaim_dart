@@ -16,6 +16,10 @@ save_frame:
     batch_size: 50  # 批量写入大小
     use_compression: true  # 使用ZSTD压缩
     
+    # 间隔取帧配置（减少资源占用）
+    frame_interval: 1  # 每N帧保存一帧，1=每帧都保存，2=每2帧保存1帧，以此类推
+    time_interval_ms: 0  # 时间间隔（毫秒），0=不按时间间隔，1000=每秒保存1帧
+    
     # 存储管理
     max_file_size_mb: 1024  # 单个文件最大大小（MB），1GB
     max_total_size_gb: 10  # 最大总存储空间（GB）
