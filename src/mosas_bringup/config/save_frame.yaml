@@ -1,0 +1,28 @@
+save_frame:
+  ros__parameters:
+    # 基本配置
+    save_path: "./recordings"  # 保存路径（程序同级目录）
+    image_topic: "/save_frame"  # 图像话题
+    detection_topic: "/detections/green_dots"  # 检测话题
+    match_status_topic: "/match_status"  # 比赛状态话题（留空接口）
+    
+    # 录制控制
+    record_images: true  # 是否记录图像
+    record_detections: true  # 是否记录检测数据
+    auto_start: false  # 是否自动开始录制（false=等待比赛开始信号）
+    
+    # 性能配置
+    buffer_size: 1000  # 内存缓冲区大小（消息数）
+    batch_size: 50  # 批量写入大小
+    use_compression: true  # 使用ZSTD压缩
+    
+    # 存储管理
+    max_file_size_mb: 1024  # 单个文件最大大小（MB），1GB
+    max_total_size_gb: 10  # 最大总存储空间（GB）
+    disk_space_threshold_gb: 5  # 磁盘空间告警阈值（GB）
+    
+    # 图像处理（预留）
+    downsample_ratio: 1.0  # 降采样比例（1.0为不降采样）
+    image_quality: 95  # JPEG质量（如果使用图像压缩）
+    
+    # 注意：相机内参现在从/camera_info话题获取，不在此配置文件中设置

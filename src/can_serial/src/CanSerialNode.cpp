@@ -50,8 +50,6 @@ CanSerialNode::CanSerialNode(const rclcpp::NodeOptions & options)
     "/detections/green_dots", rclcpp::SensorDataQoS(),
     std::bind(&CanSerialNode::green_dots_callback, this, std::placeholders::_1));
 
-  // timer_ = this->create_wall_timer(
-  //   std::chrono::milliseconds(10), std::bind(&CanSerialNode::handle_can_frame, this));
 }
 // ==========================================================
 // 动态参数回调处理函数
@@ -87,75 +85,45 @@ rcl_interfaces::msg::SetParametersResult CanSerialNode::parameters_callback(
 
   return result;
 }
-// void CanSerialNode::parse_received_data()
-// {
-//   const size_t FRAME_LENGTH = 6; 
-
-//   while (rx_buffer_.size() >= FRAME_LENGTH) {
-//     if (rx_buffer_[0] == 0x55 && rx_buffer_[1] == 0xAA) {
-//       uint8_t checksum = 0;
-//       for (size_t i = 0; i < FRAME_LENGTH - 1; i++) {
-//         checksum += rx_buffer_[i];
-//       }
-
-//       if (checksum == rx_buffer_[FRAME_LENGTH - 1]) {
-//         // 校验成功，提取数据并处理
-
-
-
-
-
-
-//         rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + FRAME_LENGTH);
-//       } else {
-//         // 校验和失败：可能是误判的帧头，丢弃当前字节（或者整帧），继续往后找
-//         RCLCPP_WARN(this->get_logger(), "串口接收校验和错误！");
-//         rx_buffer_.erase(rx_buffer_.begin()); // 弹出第一个字节，重新对齐
-//       }
-//     } else {
-//       // 当前头部不是 0x55，说明数据错位，弹出一个字节，继续寻找正确帧头
-//       rx_buffer_.erase(rx_buffer_.begin());
-//     }
-//   }
-// }
+void CanSerialNode::parse_received_data()
+{
+  
+}
 
 void CanSerialNode::handle_can_frame(const can_frame & frame){
 
-  RCLCPP_INFO(this->get_logger(),"已经收到消息");
-  RCLCPP_INFO(get_logger(), "收到CAN帧 - ID: 0x%x, 长度: %d", frame.can_id, frame.can_dlc);
-    // 仅处理ID为0xA0的帧
-    if (frame.can_id == 0x100 && frame.can_dlc >= 7)
-    {
-      std::stringstream ss;
-      for (size_t i = 0; i < frame.can_dlc; ++i) {
-          ss << std::setw(2) << std::setfill('0') << std::hex 
-            << static_cast<int>(frame.data[i]) << " ";
-      }
-      RCLCPP_INFO(this->get_logger(), "CAN Received -> %s", ss.str().c_str());
-    }
+  // RCLCPP_INFO(this->get_logger(),"已经收到消息");
+  // RCLCPP_INFO(get_logger(), "收到CAN帧 - ID: 0x%x, 长度: %d", frame.can_id, frame.can_dlc);
+  //   // 仅处理ID为0xA0的帧
+  //   if (frame.can_id == 0x100 && frame.can_dlc >= 7)
+  //   {
+  //     std::stringstream ss;
+  //     for (size_t i = 0; i < frame.can_dlc; ++i) {
+  //         ss << std::setw(2) << std::setfill('0') << std::hex 
+  //           << static_cast<int>(frame.data[i]) << " ";
+  //     }
+  //     RCLCPP_INFO(this->get_logger(), "CAN Received -> %s", ss.str().c_str());
+  //   }
 }
 
 void CanSerialNode::send_command(can_frame& frame, double speed, bool fire)
 {
+  frame.can_id = 0x106;
+  frame.can_dlc = 8;
+  
   std::memset(frame.data, 0, sizeof(frame.data));
   int16_t speed_int = static_cast<int16_t>(speed);
 
-  frame.data[0] = 0xAA;
-  frame.data[1] = 0x55;
-  frame.data[2] = fire ? 0x01 : 0x00;
+  frame.data[0] = fire ? 0x01 : 0x00;
+  frame.data[1] = (speed_int >> 8) & 0xFF;
+  frame.data[2] = speed_int & 0xFF;
   
 
-  frame.data[3] = speed_int & 0xFF;
-  frame.data[4] = (speed_int >> 8) & 0xFF;
+  frame.data[3] = 0x00;
+  frame.data[4] = 0x00;
   frame.data[5] = 0x00;
-  
-
-  uint8_t checksum = 0;
-  for (int i = 0; i < frame.can_dlc-2; i++) {
-    checksum += frame.data[i];
-  }
-  frame.data[6] = checksum;
-  frame.data[7] = 0x01;
+  frame.data[6] = 0x00;
+  frame.data[7] = 0x00;
 
   try {
     can_core_->send_frame(frame);
@@ -169,8 +137,6 @@ void CanSerialNode::green_dots_callback(const autoaim_interfaces::msg::GreenDot:
 {
 
   can_frame frame;
-  frame.can_id = 0x106;
-  frame.can_dlc = 8;
 
   rclcpp::Time current_time = msg->header.stamp;
   double current_x = msg->x;

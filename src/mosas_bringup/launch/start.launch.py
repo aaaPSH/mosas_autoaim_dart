@@ -22,6 +22,7 @@ def generate_launch_description():
             get_package_share_directory('mosas_bringup'),
             'config',
             'base_detect.yaml'
+            #'base_detect_test.yaml'
         )
     )
     serial_params_file = LaunchConfiguration(
@@ -53,25 +54,18 @@ def generate_launch_description():
                 parameters=[detector_params_file],
                 extra_arguments=[{"use_intra_process_comms": True}],
             ),
-            # ComposableNode(
-            #     package="can_serial",
-            #     plugin="can_serial::CanSerialNode",
-            #     name="can_serial_node",
-            #     extra_arguments=[{"use_intra_process_comms": True}],
-            # ),
             ComposableNode(
-                package="uart_serial",
-                plugin="uart_serial::UartSerialNode",
-                name="uart_serial_node",
-                parameters=[serial_params_file],
+                package="can_serial",
+                plugin="can_serial::CanSerialNode",
+                name="can_serial_node",
                 extra_arguments=[{"use_intra_process_comms": True}],
-            )
-            # ComposableNode(
-            #     package="save_frame",
-            #     plugin="SaveFrameNode",
-            #     name="SaveFrameNode",
-            #     extra_arguments=[{"use_intra_process_comms": True}],
-            # ),
+            ),
+            ComposableNode(
+                package="save_frame",
+                plugin="SaveFrameNode",
+                name="SaveFrameNode",
+                extra_arguments=[{"use_intra_process_comms": True}],
+            ),
         ],
         output="screen",
     )

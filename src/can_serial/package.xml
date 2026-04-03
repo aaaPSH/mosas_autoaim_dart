@@ -2,9 +2,9 @@
 <package format="3">
 	<name>can_serial</name>
 	<version>0.0.0</version>
-	<description>TODO: Package description</description>
+	<description>CAN serial communication node for autoaim system</description>
 	<maintainer email="zllc@todo.todo">zllc</maintainer>
-	<license>TODO: License declaration</license>
+	<license>Apache-2.0</license>
 
 	<buildtool_depend>ament_cmake</buildtool_depend>
 
@@ -21,9 +21,3 @@
 		<build_type>ament_cmake</build_type>
 	</export>
 </package>
-
-
-	
-
-
-

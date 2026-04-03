@@ -136,7 +136,6 @@ public:
     MV_CC_StartGrabbing(camera_handle_);
 
     while (rclcpp::ok()) {
-      //MV_CC_SetCommandValue(camera_handle_, "TriggerSoftware");
       nRet = MV_CC_GetImageBuffer(camera_handle_, &OutFrame, 1000);
 
       if (nRet == MV_OK) {
@@ -257,8 +256,7 @@ public:
     double gain = this->declare_parameter("gain", fValue.fCurValue, param_desc);
     nRet = MV_CC_SetFloatValue(camera_handle_, "Gain", gain);
 
-    MV_CC_SetEnumValue(camera_handle_, "TriggerMode", 1);
-    MV_CC_SetEnumValue(camera_handle_, "TriggerSource", MV_TRIGGER_SOURCE_SOFTWARE);
+    MV_CC_SetEnumValue(camera_handle_, "TriggerMode", 0);
   }
 
   rcl_interfaces::msg::SetParametersResult parametersCallback(

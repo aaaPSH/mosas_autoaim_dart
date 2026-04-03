@@ -3,9 +3,9 @@
 <package format="3">
   <name>mosas_bringup</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="you@example.com">zllc</maintainer>
-  <license>TODO: License declaration</license>
+  <description>Launch files and configurations for mosas autoaim system</description>
+  <maintainer email="zllc@todo.todo">zllc</maintainer>
+  <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
