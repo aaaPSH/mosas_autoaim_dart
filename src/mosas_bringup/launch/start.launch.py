@@ -48,7 +48,7 @@ def generate_launch_description():
                 extra_arguments=[{"use_intra_process_comms": True}],
             ),
             ComposableNode(
-                package="detector_dl_base",
+                package="detect_base",
                 plugin="GreenDotDetectNode",
                 name="green_dot_detect_node",
                 parameters=[detector_params_file],
@@ -60,12 +60,12 @@ def generate_launch_description():
                 name="can_serial_node",
                 extra_arguments=[{"use_intra_process_comms": True}],
             ),
-            ComposableNode(
-                package="save_frame",
-                plugin="SaveFrameNode",
-                name="SaveFrameNode",
-                extra_arguments=[{"use_intra_process_comms": True}],
-            ),
+            # ComposableNode(
+            #     package="save_frame",
+            #     plugin="SaveFrameNode",
+            #     name="SaveFrameNode",
+            #     extra_arguments=[{"use_intra_process_comms": True}],
+            # ),
         ],
         output="screen",
     )
