@@ -15,7 +15,7 @@ class CanSerialNode : public rclcpp::Node
 {
 public:
   explicit CanSerialNode(const rclcpp::NodeOptions & options);
-  void send_command(can_frame& frame, double speed, bool fire);
+  void send_command(double speed, bool fire);
   void handle_can_frame(const can_frame & frame);
 
 private:
@@ -30,6 +30,19 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
   
   std::unique_ptr<CanSerial> can_core_;
+  can_frame frame_;
+  std::mutex data_mutex_; // 定义互斥锁
+  enum class GameStatus : uint8_t {
+    PRE_PREPARATION = 0,   // 比赛未开始
+    PREPARATION     = 1,   // 准备阶段
+    SELF_CHECK      = 2,   // 自检阶段
+    START_COUNTDOWN = 3,   // 5s 倒计时
+    IN_GAME         = 4,   // 比赛中
+    END_GAME        = 5,   // 比赛结束
+  };
+  bool shooting_ = false;
+  bool calibrated_ = false;
+  GameStatus current_game_status_ = GameStatus::PRE_PREPARATION;
   void parse_received_data();
 
   OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;

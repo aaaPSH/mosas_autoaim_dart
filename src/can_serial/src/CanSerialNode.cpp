@@ -7,6 +7,10 @@ namespace can_serial
 CanSerialNode::CanSerialNode(const rclcpp::NodeOptions & options)
 : Node("can_serial_node", options)
 {
+  std::memset(&frame_, 0, sizeof(frame_)); // 初始化CAN帧数据为0
+  frame_.can_id = CAN_TX_ID;
+  frame_.can_dlc = CAN_FRAME_DLC;
+
   // ================= [ 1. 声明并读取参数 ] =================
   this->declare_parameter("debug_level", 1);
 
@@ -95,39 +99,53 @@ void CanSerialNode::handle_can_frame(const can_frame & frame){
   // RCLCPP_INFO(this->get_logger(),"已经收到消息");
   // RCLCPP_INFO(get_logger(), "收到CAN帧 - ID: 0x%x, 长度: %d", frame.can_id, frame.can_dlc);
   //   // 仅处理ID为0xA0的帧
-  //   if (frame.can_id == CAN_RX_ID && frame.can_dlc >= CAN_MIN_RX_DLC)
-  //   {
-  //     std::stringstream ss;
-  //     for (size_t i = 0; i < frame.can_dlc; ++i) {
-  //         ss << std::setw(2) << std::setfill('0') << std::hex 
-  //           << static_cast<int>(frame.data[i]) << " ";
-  //     }
+  if (frame.can_id == CAN_RX_ID && frame.can_dlc >= CAN_MIN_RX_DLC)
+  {
+    uint8_t calibrated_status = frame.data[3];
+    uint8_t shooting_status = frame.data[4];
+    uint8_t game_status = frame.data[5];
+
+    calibrated_ = (calibrated_status == 0x01);
+    shooting_ = (shooting_status == 0x01);
+    current_game_status_ = static_cast<GameStatus>(game_status);
+    if (!calibrated_)
+    {
+      std::lock_guard<std::mutex> lock(data_mutex_);
+      frame_.data[3] = 0X01; 
+    }else{
+      std::lock_guard<std::mutex> lock(data_mutex_);
+      frame_.data[3] = 0X00;
+    }
+  }
   //     RCLCPP_INFO(this->get_logger(), "CAN Received -> %s", ss.str().c_str());
   //   }
 }
 
-void CanSerialNode::send_command(can_frame& frame, double speed, bool fire)
+void CanSerialNode::send_command(double speed, bool fire)
 {
-  //RCLCPP_INFO(this->get_logger(),"%2.f",speed);
-  frame.can_id = CAN_TX_ID;
-  frame.can_dlc = CAN_FRAME_DLC;
+  if(shooting_){
+    std::lock_guard<std::mutex> lock(data_mutex_);
+    frame_.data[0] = FIRE_ON;
+    frame_.data[1] = 0x00;
+    frame_.data[2] = 0x00;
+  }else{
+    if(current_game_status_ != GameStatus::IN_GAME){
+      int16_t speed_int = static_cast<int16_t>(speed * SCALE);
+      std::lock_guard<std::mutex> lock(data_mutex_);
+      frame_.data[0] = FIRE_OFF;
+      frame_.data[1] = (speed_int >> 8) & 0xFF;
+      frame_.data[2] = speed_int & 0xFF;
+    }else{
+      int16_t speed_int = static_cast<int16_t>(speed * SCALE);
+      std::lock_guard<std::mutex> lock(data_mutex_);
+      frame_.data[0] = fire ? FIRE_ON : FIRE_OFF;
+      frame_.data[1] = (speed_int >> 8) & 0xFF;
+      frame_.data[2] = speed_int & 0xFF;
+    }
+  }
   
-  std::memset(frame.data, 0, sizeof(frame.data));
-  int16_t speed_int = static_cast<int16_t>(speed * SCALE);
-
-  frame.data[0] = fire ? FIRE_ON : FIRE_OFF;
-  frame.data[1] = (speed_int >> 8) & 0xFF;
-  frame.data[2] = speed_int & 0xFF;
-  
-
-  frame.data[3] = 0x00;
-  frame.data[4] = 0x00;
-  frame.data[5] = 0x00;
-  frame.data[6] = 0x00;
-  frame.data[7] = 0x00;
-
   try {
-    can_core_->send_frame(frame);
+    can_core_->send_frame(frame_);
   } catch (const std::exception & e) {
     RCLCPP_ERROR(get_logger(), "CAN 发送异常: %s", e.what());
   }
@@ -136,7 +154,6 @@ void CanSerialNode::send_command(can_frame& frame, double speed, bool fire)
 
 void CanSerialNode::green_dots_callback(const autoaim_interfaces::msg::GreenDot::SharedPtr msg)
 {
-  can_frame frame;
   rclcpp::Time current_time = msg->header.stamp;
   double current_x = msg->x;
   double current_error = msg->d_pixel;
@@ -158,7 +175,7 @@ void CanSerialNode::green_dots_callback(const autoaim_interfaces::msg::GreenDot:
     
     // 还在容忍范围内，保持最后一次的速度（惯性滑行）
     if (lost_frames_count_ <= MAX_LOST_TOLERANCE) {
-      send_command(frame, last_valid_speed_, false);
+      send_command(last_valid_speed_, false);
       return; 
     } 
     else {
@@ -178,20 +195,20 @@ void CanSerialNode::green_dots_callback(const autoaim_interfaces::msg::GreenDot:
       double target_speed = my_pid_.compute(current_error, dt);
 
       if (std::abs(current_error) <  pid_params_.deadzone) {
-        send_command(frame, 0, false);
+        send_command(0, false);
         RCLCPP_INFO(this->get_logger(), "状态切换: TRACKING -> VERIFYING");
         current_state_ = AimState::VERIFYING;
         history_x_.clear();
         history_x_.push_back(current_error); // 把当前的合格数据放进去
       } else {
-        send_command(frame, target_speed, false);
+        send_command(target_speed, false);
         last_valid_speed_ = target_speed;
       }
       break;
     }
 
     case AimState::VERIFYING: {
-      send_command(frame, 0, false);
+      send_command(0, false);
       history_x_.push_back(current_error);
 
       if (history_x_.size() >= VERIFY_FRAMES) {
@@ -213,7 +230,7 @@ void CanSerialNode::green_dots_callback(const autoaim_interfaces::msg::GreenDot:
     }
 
     case AimState::LOCKED: {
-      send_command(frame, 0, true);
+      send_command(0, true);
       if (std::abs(current_error) > pid_params_.deadzone * DEADZONE_MULTIPLIER) {
         RCLCPP_INFO(this->get_logger(), "状态切换: LOCKED -> TRACKING");
         current_state_ = AimState::TRACKING;
@@ -229,11 +246,11 @@ void CanSerialNode::green_dots_callback(const autoaim_interfaces::msg::GreenDot:
         current_state_ = AimState::TRACKING;
         my_pid_.reset();
         double target_speed = my_pid_.compute(current_error, dt);
-        send_command(frame, target_speed, false);
+        send_command(target_speed, false);
         last_valid_speed_ = target_speed;
       } else {
         // 真的没看见，发 0 原地等待
-        send_command(frame, 0, false);
+        send_command(0, false);
         last_valid_speed_ = 0.0; 
       }
       break;
