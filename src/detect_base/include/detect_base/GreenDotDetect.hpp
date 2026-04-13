@@ -37,7 +37,7 @@ struct DetectParams
   double min_gb_ratio = 1.5;  // Green/Blue 能量比
 
   // --- 标定修正 ---
-  double pix_offset = 0.0;  // 偏航角补偿 (度)
+  double calibrated_pixel_x = 0.0;  // 校准的像素点x坐标，用于计算像素差和yaw角
 };
 
 /**

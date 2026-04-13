@@ -379,9 +379,10 @@ bool GreenDotDetect::calculate_dots_yaw(std::vector<Dot> & dots)
   if (dots.empty()) return false;
   for (size_t i = 0; i < dots.size(); ++i) {
     // atan(x) 得到的是归一化平面上的角度 (Assuming z=1)
+    // 使用校准的像素点x坐标而不是相机内参中的cx
     dots[i].yaw =
       std::atan(
-        (dots[i].center.x - cameraMatrix.at<double>(0, 2)) / cameraMatrix.at<double>(0, 0)) *
+        (dots[i].center.x - params.calibrated_pixel_x) / cameraMatrix.at<double>(0, 0)) *
         (180.0 / CV_PI);
   }
   return true;

@@ -94,7 +94,7 @@ public:
     this->declare_parameter("detect.detect_scale", 10.0);  // deg
     this->declare_parameter("detect.distance", 25000.0);   // mm
 
-    this->declare_parameter("detect.pix_offset", 0.0);
+    this->declare_parameter("detect.calibrated_pixel_x", 0.0);
 
     // 首次同步参数
     refresh_params();
@@ -144,7 +144,7 @@ private:
       bool success = cv::imwrite(ss.str(), save_img);
       if (!success) {
           // 如果还是失败（比如权限不足），至少你会知道
-          //std::cerr << "Failed to save image to: " << ss.str() << std::endl;
+          std::cerr << "Failed to save image to: " << ss.str() << std::endl;
           RCLCPP_ERROR(this->get_logger(), "Failed to save image to: %s", ss.str().c_str());
       }
   }
@@ -175,15 +175,15 @@ private:
     this->get_parameter("detect.detect_scale", p.detect_scale);
     this->get_parameter("detect.distance", p.distance);
 
-    this->get_parameter("detect.pix_offset", p.pix_offset);
+    this->get_parameter("detect.calibrated_pixel_x", p.calibrated_pixel_x);
 
     // 更新算法内部状态
     detector_->update_params(p);
 
     RCLCPP_INFO(
       this->get_logger(),
-      "[Params Updated] Debug:%d | V_Low:%d | Area:%.1f-%.1f | Dist:%.0f | YawOff:%.1f",
-      debug_mode_, p.v_low, p.min_area, p.max_area, p.distance, p.pix_offset);
+      "[Params Updated] Debug:%d | V_Low:%d | Area:%.1f-%.1f | Dist:%.0f | CalPixelX:%.1f",
+      debug_mode_, p.v_low, p.min_area, p.max_area, p.distance, p.calibrated_pixel_x);
   }
 
   // -----------------------------------------------------------------
@@ -237,8 +237,8 @@ private:
       } else if (name == "detect.distance") {
         p.distance = param.as_double();
         algo_params_changed = true;
-      } else if (name == "detect.pix_offset") {
-        p.pix_offset = param.as_double();
+      } else if (name == "detect.calibrated_pixel_x") {
+        p.calibrated_pixel_x = param.as_double();
         algo_params_changed = true;
       } else if (name == "detect.detect_scale") {
         p.detect_scale = param.as_double();
@@ -332,8 +332,7 @@ private:
       target.x = d.center.x;
       target.y = d.center.y;
       target.angle_yaw = d.yaw;
-      target.d_pixel = target.x - camera_matrix_.at<double>(0, 2) + p.pix_offset;  // 加上像素偏移补偿
-      //RCLCPP_INFO(this->get_logger(), "%2.f", p.pix_offset);
+      target.d_pixel = target.x - p.calibrated_pixel_x;  // 使用校准的像素点x坐标计算像素差
 
       target_pub->publish(target);
     } else if (!found) {
