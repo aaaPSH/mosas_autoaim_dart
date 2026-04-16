@@ -80,15 +80,22 @@ bool GreenDotDetect::detect(const cv::Mat & raw_image, std::vector<Dot> & dots, 
   }
 
   // --- 步骤 2: 物理 ROI 计算 (基于相机高度和目标高度) ---
-  double fy_half = cameraMatrix.at<double>(1, 1) / 2.0;
-  double fx_half = cameraMatrix.at<double>(0, 0) / 2.0;
-  double cy_half = cameraMatrix.at<double>(1, 2) / 2.0;
-  double cx_half = cameraMatrix.at<double>(0, 2) / 2.0;
+  // 注意：所有物理量使用毫米单位，相机内参以像素为单位
+  double fy_half = cameraMatrix.at<double>(1, 1) / 2.0;  // 半分辨率下的垂直焦距 (像素)
+  double fx_half = cameraMatrix.at<double>(0, 0) / 2.0;  // 半分辨率下的水平焦距 (像素)
+  double cy_half = cameraMatrix.at<double>(1, 2) / 2.0;  // 半分辨率下的垂直光心 (像素)
+  double cx_half = cameraMatrix.at<double>(0, 2) / 2.0;  // 半分辨率下的水平光心 (像素)
 
+  // 高度差 (毫米)
   double delta_h = params.target_height - params.camera_height;
+  
+  // 投影偏移计算：像素偏移 = (像素焦距 × 物理高度差) / 物理距离
+  // fy_half: 像素, delta_h: 毫米, params.distance: 毫米
+  // 结果：像素 (正确，因为 fy_half 已包含像素/毫米转换)
   double projected_offset = (fy_half * delta_h) / params.distance;
   double expected_y = cy_half - projected_offset;
 
+  // 搜索宽度计算：像素宽度 = 像素焦距 × tan(搜索角度)
   double search_w = std::abs(fx_half * std::tan(TO_RADIAN(params.detect_scale)));
   double expected_x = cx_half;
 
@@ -378,8 +385,11 @@ bool GreenDotDetect::calculate_dots_yaw(std::vector<Dot> & dots)
 {
   if (dots.empty()) return false;
   for (size_t i = 0; i < dots.size(); ++i) {
-    // atan(x) 得到的是归一化平面上的角度 (Assuming z=1)
-    // 使用校准的像素点x坐标而不是相机内参中的cx
+    // 偏航角计算：yaw = arctan(像素差 / 焦距) * (180/π)
+    // dots[i].center.x: 像素坐标 (去畸变后的归一化平面坐标)
+    // params.calibrated_pixel_x: 像素坐标 (校准的像素点x坐标)
+    // cameraMatrix.at<double>(0, 0): 水平焦距 (像素)
+    // 注意：所有量都是像素单位，计算结果为角度(度)
     dots[i].yaw =
       std::atan(
         (dots[i].center.x - params.calibrated_pixel_x) / cameraMatrix.at<double>(0, 0)) *

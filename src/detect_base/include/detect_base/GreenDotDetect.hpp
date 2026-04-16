@@ -18,23 +18,23 @@ struct DetectParams
   // --- 几何与ROI参数 ---
   double target_height = 600.0;  // 目标离地高度 (mm)
   double camera_height = 0.0;    // 相机离地高度 (mm)
-  double distance = 2500.0;      // 预估距离 (mm)
-  double detect_scale = 5.0;     // 搜索条带的垂直视场角范围 (度)
-  int search_strip_min_h = 30;   // 搜索条带最小像素高度 (防止过窄)
+  double distance = 25000.0;     // 预估距离 (mm) - 25米
+  double detect_scale = 10.0;    // 搜索条带的垂直视场角范围 (度)
+  int search_strip_min_h = 50;   // 搜索条带最小像素高度 (防止过窄)
 
   // --- 阈值与形态学 ---
   int v_low = 210;  // 绿色通道二值化阈值 (需根据曝光调整)
 
   // --- 几何筛选 (针对半分辨率图) ---
-  double min_area = 5.0;   // 最小面积 (对应原图上的像素数，代码中会 /4 处理)
+  double min_area = 2.0;   // 最小面积 (对应原图上的像素数，代码中会 /4 处理)
   double max_area = 30.0;  // 最大面积
-  double min_aspect_ratio = 0.5;  // 最小长宽比
-  double max_aspect_ratio = 2.0;  // 最大长宽比
-  double min_circularity = 0.6;  // 最小圆形度 (小目标像素化严重，圆形度不会太高)
+  double min_aspect_ratio = 0.4;  // 最小长宽比
+  double max_aspect_ratio = 2.5;  // 最大长宽比
+  double min_circularity = 0.4;   // 最小圆形度 (小目标像素化严重，圆形度不会太高)
 
   // --- 颜色比率 (Bayer域) ---
   double min_gr_ratio = 3.0;  // Green/Red 能量比
-  double min_gb_ratio = 1.5;  // Green/Blue 能量比
+  double min_gb_ratio = 0.8;  // Green/Blue 能量比
 
   // --- 标定修正 ---
   double calibrated_pixel_x = 0.0;  // 校准的像素点x坐标，用于计算像素差和yaw角
