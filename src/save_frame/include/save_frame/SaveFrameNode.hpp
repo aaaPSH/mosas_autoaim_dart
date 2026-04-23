@@ -21,6 +21,7 @@
 #include "sensor_msgs/msg/camera_info.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "std_msgs/msg/string.hpp"
+#include "rclcpp/parameter_client.hpp"
 
 namespace save_frame
 {
@@ -64,6 +65,11 @@ private:
   void cleanupOldFiles();
   std::string generateFilename() const;
   uint64_t getAvailableDiskSpace(const std::string & path) const;
+  
+  // 录制目录管理
+  void createRecordingDir();
+  void saveDetectParams();
+  std::string recording_dir_;
 
   // 配置参数
   std::string save_path_;

@@ -12,6 +12,7 @@
 #include <rosbag2_compression_zstd/zstd_compressor.hpp>
 #include "rosbag2_compression/compression_options.hpp"
 #include "sensor_msgs/msg/camera_info.hpp"
+#include "rclcpp/parameter_client.hpp"
 
 namespace save_frame
 {
@@ -355,6 +356,130 @@ void SaveFrameNode::processBufferBatch()
   }
 }
 
+void SaveFrameNode::createRecordingDir()
+{
+  auto now = std::chrono::system_clock::now();
+  auto time_t = std::chrono::system_clock::to_time_t(now);
+  auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+    now.time_since_epoch()) % 1000;
+
+  std::stringstream ss;
+  ss << "match_" << current_match_id_ << "_"
+     << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S")
+     << "_" << std::setfill('0') << std::setw(3) << ms.count();
+
+  recording_dir_ = (std::filesystem::path(save_path_) / ss.str()).string();
+  std::filesystem::create_directories(recording_dir_);
+  
+  RCLCPP_INFO(this->get_logger(), "Created recording directory: %s", recording_dir_.c_str());
+}
+
+void SaveFrameNode::saveDetectParams()
+{
+  try {
+    // 创建参数客户端连接到green_dot_detect_node
+    auto param_client = std::make_shared<rclcpp::SyncParametersClient>(
+      this, "green_dot_detect_node");
+    
+    // 等待服务可用
+    if (!param_client->wait_for_service(std::chrono::seconds(2))) {
+      RCLCPP_WARN(this->get_logger(), "green_dot_detect_node parameter service not available, skipping detect params save");
+      return;
+    }
+    
+    // 获取所有detect参数
+    std::vector<std::string> param_names = {
+      "detect.v_low", "detect.min_area", "detect.max_area",
+      "detect.min_aspect_ratio", "detect.max_aspect_ratio", "detect.min_circularity",
+      "detect.min_gr_ratio", "detect.min_gb_ratio", "detect.search_strip_min_h",
+      "detect.camera_height", "detect.target_height", "detect.detect_scale",
+      "detect.distance", "detect.calibrated_pixel_x",
+      "camera.matrix", "camera.dist_coeffs"
+    };
+    
+    auto params = param_client->get_parameters(param_names);
+    
+    // 写入yaml文件
+    std::string yaml_path = (std::filesystem::path(recording_dir_) / "detect_params.yaml").string();
+    std::ofstream yaml_file(yaml_path);
+    
+    if (!yaml_file.is_open()) {
+      RCLCPP_WARN(this->get_logger(), "Failed to open detect_params.yaml for writing");
+      return;
+    }
+    
+    // 获取当前时间
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      now.time_since_epoch()) % 1000;
+    
+    yaml_file << "# 录制时的detect参数" << std::endl;
+    yaml_file << "# recorded_at: "
+              << std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S")
+              << "." << std::setfill('0') << std::setw(3) << ms.count()
+              << std::endl;
+    yaml_file << "detect:" << std::endl;
+    
+    for (const auto & param : params) {
+      const std::string & name = param.get_name();
+      // 只保存detect.*参数
+      if (name.find("detect.") == 0) {
+        std::string short_name = name.substr(7); // 去掉"detect."前缀
+        yaml_file << "  " << short_name << ": ";
+        
+        switch (param.get_type()) {
+          case rclcpp::ParameterType::PARAMETER_INTEGER:
+            yaml_file << param.as_int();
+            break;
+          case rclcpp::ParameterType::PARAMETER_DOUBLE:
+            yaml_file << param.as_double();
+            break;
+          case rclcpp::ParameterType::PARAMETER_BOOL:
+            yaml_file << (param.as_bool() ? "true" : "false");
+            break;
+          case rclcpp::ParameterType::PARAMETER_STRING:
+            yaml_file << "\"" << param.as_string() << "\"";
+            break;
+          default:
+            yaml_file << "null";
+            break;
+        }
+        yaml_file << std::endl;
+      }
+    }
+    
+    // 保存相机参数
+    yaml_file << "camera:" << std::endl;
+    for (const auto & param : params) {
+      const std::string & name = param.get_name();
+      if (name == "camera.matrix") {
+        yaml_file << "  matrix: [";
+        auto values = param.as_double_array();
+        for (size_t i = 0; i < values.size(); ++i) {
+          if (i > 0) yaml_file << ", ";
+          yaml_file << values[i];
+        }
+        yaml_file << "]" << std::endl;
+      } else if (name == "camera.dist_coeffs") {
+        yaml_file << "  dist_coeffs: [";
+        auto values = param.as_double_array();
+        for (size_t i = 0; i < values.size(); ++i) {
+          if (i > 0) yaml_file << ", ";
+          yaml_file << values[i];
+        }
+        yaml_file << "]" << std::endl;
+      }
+    }
+    
+    yaml_file.close();
+    RCLCPP_INFO(this->get_logger(), "Saved detect params to: %s", yaml_path.c_str());
+    
+  } catch (const std::exception & e) {
+    RCLCPP_WARN(this->get_logger(), "Failed to save detect params: %s", e.what());
+  }
+}
+
 void SaveFrameNode::startRecording()
 {
   if (is_recording_) {
@@ -363,10 +488,17 @@ void SaveFrameNode::startRecording()
   }
   
   try {
+    // 创建按时间命名的录制目录
+    createRecordingDir();
+    
+    // 保存当前detect参数到录制目录
+    saveDetectParams();
+    
+    // 创建bag文件在录制目录中
     createNewBagFile();
     is_recording_ = true;
     
-    RCLCPP_INFO(this->get_logger(), "Started recording to: %s", save_path_.c_str());
+    RCLCPP_INFO(this->get_logger(), "Started recording to: %s", recording_dir_.c_str());
     RCLCPP_INFO(this->get_logger(), "Match ID: %s", current_match_id_.c_str());
     
     // 重置统计
@@ -406,7 +538,7 @@ void SaveFrameNode::createNewBagFile()
   }
   
   std::string filename = generateFilename();
-  std::string full_path = (std::filesystem::path(save_path_) / filename).string();
+  std::string full_path = (std::filesystem::path(recording_dir_) / filename).string();
   
   rosbag2_storage::StorageOptions storage_options;
   storage_options.uri = full_path;

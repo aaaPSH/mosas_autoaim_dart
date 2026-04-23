@@ -25,15 +25,14 @@ def generate_launch_description():
             # 'base_detect_test.yaml'
         )
     )
-    serial_params_file = LaunchConfiguration(
-        "serial_params_file",
+    system_monitor_params_file = LaunchConfiguration(
+        "system_monitor_params_file",
         default=os.path.join(
             get_package_share_directory('mosas_bringup'),
             'config',
-            'serial_params.yaml'
+            'system_monitor_params.yaml'
         )
     )
-
     container = ComposableNodeContainer(
         name="autoaim",
         namespace="",
@@ -58,7 +57,6 @@ def generate_launch_description():
                 package="can_serial",
                 plugin="can_serial::CanSerialNode",
                 name="can_serial_node",
-                parameters=[serial_params_file],
                 extra_arguments=[{"use_intra_process_comms": True}],
             ),
             # ComposableNode(
@@ -67,6 +65,13 @@ def generate_launch_description():
             #     name="SaveFrameNode",
             #     extra_arguments=[{"use_intra_process_comms": True}],
             # ),
+            ComposableNode(
+                package="system_monitor",
+                plugin="system_monitor::SystemMonitorNode",
+                name="system_monitor_node",
+                parameters=[system_monitor_params_file],
+                extra_arguments=[{"use_intra_process_comms": True}],
+            ),
         ],
         output="screen",
     )
@@ -74,5 +79,6 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("camera_params_file", default_value=camera_params_file),
         DeclareLaunchArgument("detector_params_file", default_value=detector_params_file),
+        DeclareLaunchArgument("system_monitor_params_file", default_value=system_monitor_params_file),
         container,
     ])

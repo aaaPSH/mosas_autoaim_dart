@@ -31,7 +31,9 @@ private:
   //储存计时器
   std::chrono::steady_clock::time_point last_save_time_;
 
-  std::chrono::milliseconds save_interval_{1000/60};
+  // 保存帧率（可通过yaml配置）
+  double save_fps_ = 60.0;
+  std::chrono::milliseconds save_interval_{1000 / 60};
 
 
   // 调试开关
@@ -74,6 +76,7 @@ public:
     // ==========================================
     this->declare_parameter("debug_mode", true);
     this->declare_parameter("save_images", false);
+    this->declare_parameter("save_fps", 60.0);
 
     // 阈值与形态
     this->declare_parameter("detect.v_low", 100);
@@ -121,15 +124,20 @@ private:
   {
       cv::Mat save_img = image.clone();
       
-      // 1. 定义你的保存目录
-      std::string save_dir = "/home/nvidia/saved_green_dots";
+      // 1. 定义基础保存目录
+      std::string base_dir = "/home/nvidia/saved_green_dots";
 
-      // 2. 检查并创建目录 (如果目录不存在，就自动创建它)
-      if (!std::filesystem::exists(save_dir)) {
-          std::filesystem::create_directories(save_dir);
-          // 如果是在 ROS 2 节点中，建议加一句日志打印：
-          // RCLCPP_INFO(this->get_logger(), "Created directory: %s", save_dir.c_str());
-      }
+      // 2. 按节点启动时间创建子目录（只在第一次创建）
+      static std::string save_dir = []() {
+          auto now = std::chrono::system_clock::now();
+          auto time_t = std::chrono::system_clock::to_time_t(now);
+          std::stringstream ss;
+          ss << "/home/nvidia/saved_green_dots/"
+             << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S");
+          std::string dir = ss.str();
+          std::filesystem::create_directories(dir);
+          return dir;
+      }();
 
       auto now = std::chrono::system_clock::now();
       auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
@@ -157,6 +165,8 @@ private:
     // 读取基础控制
     this->get_parameter("debug_mode", debug_mode_);
     this->get_parameter("save_images", save_images);
+    this->get_parameter("save_fps", save_fps_);
+    save_interval_ = std::chrono::milliseconds(static_cast<int>(1000.0 / save_fps_));
 
     // 读取算法参数
     this->get_parameter("detect.v_low", p.v_low);
@@ -362,7 +372,7 @@ private:
       std::chrono::duration_cast<std::chrono::milliseconds>(now - last_save_time_).count();
     if (save_images && save_diff >= save_interval_.count()) {
       save_image_to_disk(raw_frame);
-      RCLCPP_INFO(this->get_logger(), "Image saved to disk.");
+      // RCLCPP_INFO(this->get_logger(), "Image saved to disk.");
       last_save_time_ = now;
     }
   }
