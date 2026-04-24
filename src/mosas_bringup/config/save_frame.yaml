@@ -1,4 +1,4 @@
-save_frame:
+SaveFrameNode:
   ros__parameters:
     # 基本配置
     save_path: "./recordings"  # 保存路径（程序同级目录）
@@ -9,7 +9,7 @@ save_frame:
     # 录制控制
     record_images: true  # 是否记录图像
     record_detections: true  # 是否记录检测数据
-    auto_start: false  # 是否自动开始录制（false=等待比赛开始信号）
+    auto_start: true  # 是否自动开始录制（false=等待比赛开始信号）
     
     # 性能配置
     buffer_size: 1000  # 内存缓冲区大小（消息数）

@@ -12,16 +12,8 @@ endif()
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
-# 对于ament_auto_find_build_dependencies可能找不到的包，显式查找
-find_package(yaml-cpp REQUIRED)
-
 ament_auto_add_library(${PROJECT_NAME} SHARED
   src/SaveFrameNode.cpp
-)
-
-# 添加yaml-cpp的链接，因为ament_auto_find_build_dependencies可能找不到它
-target_link_libraries(${PROJECT_NAME}
-  yaml-cpp
 )
 
 if(BUILD_TESTING)
@@ -35,7 +27,7 @@ if(BUILD_TESTING)
 endif()
 
 rclcpp_components_register_node(${PROJECT_NAME}
-  PLUGIN SaveFrameNode
+  PLUGIN "save_frame::SaveFrameNode"
   EXECUTABLE ${PROJECT_NAME}_node
 )
 

@@ -85,8 +85,7 @@ private:
   size_t max_total_size_gb_;
   size_t disk_space_threshold_gb_;
   bool use_compression_;
-  double downsample_ratio_;
-  int image_quality_;
+  // (预留)
   
   // 间隔取帧参数
   size_t frame_interval_;
@@ -111,6 +110,7 @@ private:
   // 线程和同步
   std::thread recording_thread_;
   std::mutex buffer_mutex_;
+  std::mutex writer_mutex_;  // 保护 bag_writer_ 的并发访问
   std::condition_variable buffer_cv_;
   std::deque<BufferedMessage> message_buffer_;
 
@@ -120,6 +120,7 @@ private:
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr match_status_sub_;
   rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_sub_;
   std::unique_ptr<rosbag2_cpp::writers::SequentialWriter> bag_writer_;
+  rclcpp::TimerBase::SharedPtr deferred_start_timer_;
 
   // 性能统计
   std::chrono::steady_clock::time_point last_stat_time_;

@@ -88,7 +88,7 @@ bool GreenDotDetect::detect(const cv::Mat & raw_image, std::vector<Dot> & dots, 
 
   // 高度差 (毫米)
   double delta_h = params.target_height - params.camera_height;
-  
+
   // 投影偏移计算：像素偏移 = (像素焦距 × 物理高度差) / 物理距离
   // fy_half: 像素, delta_h: 毫米, params.distance: 毫米
   // 结果：像素 (正确，因为 fy_half 已包含像素/毫米转换)

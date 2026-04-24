@@ -33,6 +33,14 @@ def generate_launch_description():
             'system_monitor_params.yaml'
         )
     )
+    save_frame_params_file = LaunchConfiguration(
+        "save_frame_params_file",
+        default=os.path.join(
+            get_package_share_directory('mosas_bringup'),
+            'config',
+            'save_frame.yaml'
+        )
+    )
     container = ComposableNodeContainer(
         name="autoaim",
         namespace="",
@@ -59,12 +67,13 @@ def generate_launch_description():
                 name="can_serial_node",
                 extra_arguments=[{"use_intra_process_comms": True}],
             ),
-            # ComposableNode(
-            #     package="save_frame",
-            #     plugin="SaveFrameNode",
-            #     name="SaveFrameNode",
-            #     extra_arguments=[{"use_intra_process_comms": True}],
-            # ),
+            ComposableNode(
+                package="save_frame",
+                plugin="save_frame::SaveFrameNode",
+                name="SaveFrameNode",
+                parameters=[save_frame_params_file],
+                extra_arguments=[{"use_intra_process_comms": True}],
+            ),
             ComposableNode(
                 package="system_monitor",
                 plugin="system_monitor::SystemMonitorNode",
@@ -80,5 +89,6 @@ def generate_launch_description():
         DeclareLaunchArgument("camera_params_file", default_value=camera_params_file),
         DeclareLaunchArgument("detector_params_file", default_value=detector_params_file),
         DeclareLaunchArgument("system_monitor_params_file", default_value=system_monitor_params_file),
+        DeclareLaunchArgument("save_frame_params_file", default_value=save_frame_params_file),
         container,
     ])

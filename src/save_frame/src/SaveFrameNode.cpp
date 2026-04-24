@@ -44,6 +44,10 @@ SaveFrameNode::~SaveFrameNode()
   stop_thread_ = true;
   buffer_cv_.notify_all();
 
+  if (deferred_start_timer_) {
+    deferred_start_timer_->cancel();
+  }
+
   if (recording_thread_.joinable()) {
     recording_thread_.join();
   }
@@ -81,9 +85,6 @@ void SaveFrameNode::initParameters()
   max_total_size_gb_ = this->declare_parameter("max_total_size_gb", 50);   // 50GB
   disk_space_threshold_gb_ = this->declare_parameter("disk_space_threshold_gb", 5);  // 5GB
   
-  // 图像处理
-  downsample_ratio_ = this->declare_parameter("downsample_ratio", 1.0);
-  image_quality_ = this->declare_parameter("image_quality", 95);
   
   // 相机内参将从/camera_info话题获取，这里只声明默认值（用于初始化）
   camera_matrix_ = {1500.0, 0.0, 640.0, 0.0, 1500.0, 360.0, 0.0, 0.0, 1.0};
@@ -131,17 +132,40 @@ void SaveFrameNode::initRecording()
 {
   // 启动录制线程
   recording_thread_ = std::thread(&SaveFrameNode::recordingThread, this);
-  
-  // 如果配置为自动开始，则开始录制
-  if (auto_start_) {
+
+  // 打印 auto_start 参数实际值，辅助诊断
+  bool auto_start = false;
+  this->get_parameter_or("auto_start", auto_start, false);
+  // RCLCPP_INFO(this->get_logger(), "auto_start parameter = %s (will try direct start and deferred start)",
+  //             auto_start ? "true" : "false");
+
+  // 方式1: 立即启动（适用于参数在构造时已生效的情况）
+  if (auto_start) {
     startRecording();
   }
+
+  // 方式2: 延迟启动（适用于参数在构造后才生效的情况）
+  // 定时器在节点完全初始化后触发，此时参数和服务都已就绪
+  deferred_start_timer_ = this->create_wall_timer(
+    std::chrono::milliseconds(300),
+    [this]() {
+      deferred_start_timer_->cancel();
+      if (is_recording_) {
+        return;
+      }
+      bool auto_start = false;
+      this->get_parameter_or("auto_start", auto_start, false);
+      if (auto_start) {
+        // RCLCPP_INFO(this->get_logger(), "Deferred start triggered, attempting recording");
+        startRecording();
+      }
+    });
 }
 
 void SaveFrameNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
   frames_received_++;
-  
+
   if (!is_recording_ || !record_images_) {
     return;
   }
@@ -279,23 +303,23 @@ void SaveFrameNode::recordingThread()
 {
   while (!stop_thread_) {
     std::unique_lock<std::mutex> lock(buffer_mutex_);
-    
+
     // 等待缓冲区有数据或停止信号
     buffer_cv_.wait_for(lock, std::chrono::milliseconds(100), [this]() {
       return !message_buffer_.empty() || stop_thread_;
     });
-    
+
     if (stop_thread_) {
       break;
     }
-    
+
     if (!message_buffer_.empty() && is_recording_) {
-      // 处理一批消息
+      lock.unlock();  // 释放 buffer 锁，让 processBufferBatch 自己获取
       processBufferBatch();
+    } else {
+      lock.unlock();
     }
-    
-    lock.unlock();
-    
+
     // 检查是否需要创建新文件
     if (is_recording_ && current_file_size_ > max_file_size_mb_ * 1024ULL * 1024ULL) {
       createNewBagFile();
@@ -305,10 +329,6 @@ void SaveFrameNode::recordingThread()
 
 void SaveFrameNode::processBufferBatch()
 {
-  if (!bag_writer_) {
-    return;
-  }
-  
   size_t processed = 0;
   std::vector<BufferedMessage> batch;
   
@@ -324,27 +344,33 @@ void SaveFrameNode::processBufferBatch()
     }
   }
   
-  // 写入消息
-  for (auto & msg : batch) {
-    try {
-      rosbag2_storage::SerializedBagMessage serialized_bag_msg;
-      serialized_bag_msg.serialized_data = std::shared_ptr<rcutils_uint8_array_t>(
-        const_cast<rcutils_uint8_array_t*>(&msg.serialized_msg->get_rcl_serialized_message()),
-        [](rcutils_uint8_array_t* /* data */) {});
-      
-      serialized_bag_msg.topic_name = msg.topic_name;
-      serialized_bag_msg.time_stamp = msg.timestamp.nanoseconds();
-      
-      bag_writer_->write(std::make_shared<rosbag2_storage::SerializedBagMessage>(serialized_bag_msg));
-      
-      // 更新文件大小估计（粗略估计）
-      current_file_size_ += msg.serialized_msg->size();
-      total_recorded_size_ += msg.serialized_msg->size();
-      frames_recorded_++;
-      
-      processed++;
-    } catch (const std::exception & e) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to write message: %s", e.what());
+  // 写入消息（在 writer_mutex_ 保护下）
+  {
+    std::lock_guard<std::mutex> wlock(writer_mutex_);
+    if (!bag_writer_) {
+      return;
+    }
+    for (auto & msg : batch) {
+      try {
+        rosbag2_storage::SerializedBagMessage serialized_bag_msg;
+        serialized_bag_msg.serialized_data = std::shared_ptr<rcutils_uint8_array_t>(
+          const_cast<rcutils_uint8_array_t*>(&msg.serialized_msg->get_rcl_serialized_message()),
+          [](rcutils_uint8_array_t* /* data */) {});
+
+        serialized_bag_msg.topic_name = msg.topic_name;
+        serialized_bag_msg.time_stamp = msg.timestamp.nanoseconds();
+
+        bag_writer_->write(std::make_shared<rosbag2_storage::SerializedBagMessage>(serialized_bag_msg));
+
+        // 更新文件大小估计（粗略估计）
+        current_file_size_ += msg.serialized_msg->size();
+        total_recorded_size_ += msg.serialized_msg->size();
+        frames_recorded_++;
+
+        processed++;
+      } catch (const std::exception & e) {
+        RCLCPP_ERROR(this->get_logger(), "Failed to write message: %s", e.what());
+      }
     }
   }
   
@@ -376,10 +402,18 @@ void SaveFrameNode::createRecordingDir()
 
 void SaveFrameNode::saveDetectParams()
 {
+  // 检查节点是否已完全构造（被 shared_ptr 持有）
+  // 在构造函数中调用时 weak_from_this 是 expired，直接返回，避免阻塞
+  auto weak_this = this->weak_from_this();
+  if (weak_this.expired()) {
+    RCLCPP_INFO(this->get_logger(), "Node not yet owned by shared_ptr, skipping param save during init");
+    return;
+  }
+
   try {
     // 创建参数客户端连接到green_dot_detect_node
     auto param_client = std::make_shared<rclcpp::SyncParametersClient>(
-      this, "green_dot_detect_node");
+      weak_this.lock(), "green_dot_detect_node");
     
     // 等待服务可用
     if (!param_client->wait_for_service(std::chrono::seconds(2))) {
@@ -398,7 +432,20 @@ void SaveFrameNode::saveDetectParams()
     };
     
     auto params = param_client->get_parameters(param_names);
-    
+
+    // 验证参数是否有效
+    size_t valid_count = 0;
+    for (const auto & param : params) {
+      if (param.get_type() != rclcpp::ParameterType::PARAMETER_NOT_SET) {
+        valid_count++;
+      } else if (!param.get_name().empty()) {
+        RCLCPP_WARN(this->get_logger(), "Parameter '%s' returned NOT_SET", param.get_name().c_str());
+      }
+    }
+    if (valid_count == 0) {
+      RCLCPP_WARN(this->get_logger(), "All parameters returned empty - parameter service may not be available");
+    }
+
     // 写入yaml文件
     std::string yaml_path = (std::filesystem::path(recording_dir_) / "detect_params.yaml").string();
     std::ofstream yaml_file(yaml_path);
@@ -490,21 +537,24 @@ void SaveFrameNode::startRecording()
   try {
     // 创建按时间命名的录制目录
     createRecordingDir();
-    
+
     // 保存当前detect参数到录制目录
     saveDetectParams();
-    
-    // 创建bag文件在录制目录中
-    createNewBagFile();
-    is_recording_ = true;
-    
-    RCLCPP_INFO(this->get_logger(), "Started recording to: %s", recording_dir_.c_str());
-    RCLCPP_INFO(this->get_logger(), "Match ID: %s", current_match_id_.c_str());
-    
-    // 重置统计
+
+    // 重置统计 (createNewBagFile 会自增 file_counter_, 先置0)
+    file_counter_ = 0;
     frames_recorded_ = 0;
     messages_dropped_ = 0;
     current_file_size_ = 0;
+    frame_counter_ = 0;
+    last_saved_time_ = std::chrono::steady_clock::now();
+
+    // 创建bag文件在录制目录中
+    createNewBagFile();
+    is_recording_ = true;
+
+    RCLCPP_INFO(this->get_logger(), "Started recording to: %s", recording_dir_.c_str());
+    RCLCPP_INFO(this->get_logger(), "Match ID: %s", current_match_id_.c_str());
     
   } catch (const std::exception & e) {
     RCLCPP_ERROR(this->get_logger(), "Failed to start recording: %s", e.what());
@@ -522,63 +572,94 @@ void SaveFrameNode::stopRecording()
   // 处理缓冲区中剩余的消息
   processBufferBatch();
   
-  if (bag_writer_) {
-    bag_writer_.reset();
+  {
+    std::lock_guard<std::mutex> wlock(writer_mutex_);
+    if (bag_writer_) {
+      bag_writer_.reset();
+    }
   }
   
   RCLCPP_INFO(this->get_logger(), "Stopped recording");
   RCLCPP_INFO(this->get_logger(), "Total frames recorded: %zu", frames_recorded_);
   RCLCPP_INFO(this->get_logger(), "Messages dropped: %zu", messages_dropped_);
+  RCLCPP_INFO(this->get_logger(), "Buffer estimate: %.1f MB, compression=%s",
+              current_file_size_.load() / (1024.0 * 1024.0),
+              use_compression_ ? "zstd" : "none");
 }
 
 void SaveFrameNode::createNewBagFile()
 {
+  std::lock_guard<std::mutex> wlock(writer_mutex_);
   if (bag_writer_) {
-    bag_writer_.reset();
+    bag_writer_.reset();  // 关闭旧文件，触发 FILE 模式压缩
   }
-  
+
   std::string filename = generateFilename();
   std::string full_path = (std::filesystem::path(recording_dir_) / filename).string();
-  
+
   rosbag2_storage::StorageOptions storage_options;
   storage_options.uri = full_path;
   storage_options.storage_id = "sqlite3";
-  
+
   rosbag2_cpp::ConverterOptions converter_options;
+  converter_options.input_serialization_format = "cdr";
   converter_options.output_serialization_format = "cdr";
-  
+
   if (use_compression_) {
-    // 使用压缩写入器
-    rosbag2_compression::CompressionOptions compression_options;
-    compression_options.compression_mode = rosbag2_compression::CompressionMode::FILE;
-    compression_options.compression_format = "zstd";
-    
-    auto compression_writer = std::make_unique<rosbag2_compression::SequentialCompressionWriter>(compression_options);
-    bag_writer_ = std::move(compression_writer);
-    
-    RCLCPP_INFO(this->get_logger(), "Using compression: format=zstd, mode=FILE");
-  } else {
-    // 使用普通写入器
-    bag_writer_ = std::make_unique<rosbag2_cpp::writers::SequentialWriter>();
+    try {
+      rosbag2_compression::CompressionOptions compression_options;
+      compression_options.compression_mode = rosbag2_compression::CompressionMode::FILE;
+      compression_options.compression_format = "zstd";
+
+      auto compression_writer = std::make_unique<rosbag2_compression::SequentialCompressionWriter>(compression_options);
+      bag_writer_ = std::move(compression_writer);
+
+      bag_writer_->open(storage_options, converter_options);
+
+      RCLCPP_INFO(this->get_logger(), "[WRITER] compression=zstd(mode:FILE) uri=%s", full_path.c_str());
+    } catch (const std::exception & e) {
+      RCLCPP_WARN(this->get_logger(), "[WRITER] compression init failed: %s", e.what());
+      RCLCPP_WARN(this->get_logger(), "[WRITER] falling back to non-compression writer");
+      bag_writer_.reset();
+      use_compression_ = false;
+    }
   }
-  
-  bag_writer_->open(storage_options, converter_options);
-  
-  // 注册话题
+
+  if (!bag_writer_) {
+    try {
+      bag_writer_ = std::make_unique<rosbag2_cpp::writers::SequentialWriter>();
+      bag_writer_->open(storage_options, converter_options);
+      RCLCPP_INFO(this->get_logger(), "[WRITER] compression=none uri=%s", full_path.c_str());
+    } catch (const std::exception & e) {
+      RCLCPP_ERROR(this->get_logger(), "[WRITER] non-compression open failed: %s", e.what());
+      bag_writer_.reset();
+      throw;  // 重新抛出，让 startRecording 的 catch 处理
+    }
+  }
+
+  // 注册话题（失败不阻止录制，只记录警告）
   if (record_images_) {
-    bag_writer_->create_topic(
-      {image_topic_, "sensor_msgs/msg/Image", "cdr", ""});
+    try {
+      bag_writer_->create_topic(
+        {image_topic_, "sensor_msgs/msg/Image", "cdr", ""});
+    } catch (const std::exception & e) {
+      RCLCPP_WARN(this->get_logger(), "Failed to create image topic: %s", e.what());
+    }
   }
-  
+
   if (record_detections_) {
-    bag_writer_->create_topic(
-      {detection_topic_, "autoaim_interfaces/msg/GreenDot", "cdr", ""});
+    try {
+      bag_writer_->create_topic(
+        {detection_topic_, "autoaim_interfaces/msg/GreenDot", "cdr", ""});
+    } catch (const std::exception & e) {
+      RCLCPP_WARN(this->get_logger(), "Failed to create detection topic: %s", e.what());
+    }
   }
-  
+
   current_file_size_ = 0;
   file_counter_++;
-  
-  RCLCPP_INFO(this->get_logger(), "Created new bag file: %s", filename.c_str());
+
+  RCLCPP_INFO(this->get_logger(), "Created new bag file: %s", full_path.c_str());
 }
 
 std::string SaveFrameNode::generateFilename() const
@@ -603,8 +684,8 @@ void SaveFrameNode::cleanupOldFiles()
   try {
     std::vector<std::filesystem::path> files;
     
-    // 收集所有bag文件
-    for (const auto & entry : std::filesystem::directory_iterator(save_path_)) {
+    // 递归收集所有bag文件
+    for (const auto & entry : std::filesystem::recursive_directory_iterator(save_path_)) {
       if (entry.is_regular_file() && entry.path().extension() == ".db3") {
         files.push_back(entry.path());
       }
