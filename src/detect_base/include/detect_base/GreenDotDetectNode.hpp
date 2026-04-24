@@ -1,6 +1,8 @@
 #include <chrono>
 #include <limits>
+#include <queue>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "autoaim_interfaces/msg/green_dot.hpp"
@@ -39,6 +41,13 @@ private:
   // 调试开关
   bool debug_mode_ = false;
   bool save_images = false;
+
+  // 异步保存线程
+  std::thread save_thread_;
+  std::mutex save_mutex_;
+  std::condition_variable save_cv_;
+  std::queue<cv::Mat> save_queue_;
+  std::atomic<bool> stop_save_thread_{false};
 
 
   DetectParams p;
@@ -117,6 +126,18 @@ public:
       "/detections/green_dots", rclcpp::SensorDataQoS().keep_last(1));
 
     RCLCPP_INFO(this->get_logger(), "Node initialized. Waiting for images...");
+
+    // 启动异步保存线程
+    save_thread_ = std::thread(&GreenDotDetectNode::saveThreadLoop, this);
+  }
+
+  ~GreenDotDetectNode() override
+  {
+    stop_save_thread_ = true;
+    save_cv_.notify_one();
+    if (save_thread_.joinable()) {
+      save_thread_.join();
+    }
   }
 
 private:
@@ -156,6 +177,24 @@ private:
           RCLCPP_ERROR(this->get_logger(), "Failed to save image to: %s", ss.str().c_str());
       }
   }
+  void saveThreadLoop()
+  {
+    while (!stop_save_thread_) {
+      cv::Mat frame;
+      {
+        std::unique_lock<std::mutex> lock(save_mutex_);
+        save_cv_.wait_for(lock, std::chrono::milliseconds(100), [this]() {
+          return !save_queue_.empty() || stop_save_thread_;
+        });
+        if (stop_save_thread_ && save_queue_.empty()) break;
+        if (save_queue_.empty()) continue;
+        frame = std::move(save_queue_.front());
+        save_queue_.pop();
+      }
+      save_image_to_disk(frame);
+    }
+  }
+
   // -----------------------------------------------------------------
   // 从 ROS 参数服务器读取最新值 -> 打包进 DetectParams -> 传给算法
   // -----------------------------------------------------------------
@@ -371,8 +410,11 @@ private:
     auto save_diff =
       std::chrono::duration_cast<std::chrono::milliseconds>(now - last_save_time_).count();
     if (save_images && save_diff >= save_interval_.count()) {
-      save_image_to_disk(raw_frame);
-      // RCLCPP_INFO(this->get_logger(), "Image saved to disk.");
+      {
+        std::lock_guard<std::mutex> lock(save_mutex_);
+        save_queue_.push(raw_frame.clone());
+      }
+      save_cv_.notify_one();
       last_save_time_ = now;
     }
   }

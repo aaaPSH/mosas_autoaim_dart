@@ -59,10 +59,7 @@ void CanSerialNode::handle_can_frame(const can_frame & frame){
   if (frame.can_id == CAN_RX_ID && frame.can_dlc >= CAN_MIN_RX_DLC)
   {
     //根据传输帧改变发送标志位
-    if(send_flag_){
-      send_command(this->current_error);
-      send_flag_ = false;
-    }
+    send_flag_ = true;
   }
   //     RCLCPP_INFO(this->get_logger(), "CAN Received -> %s", ss.str().c_str());
   //   }
@@ -120,6 +117,10 @@ void CanSerialNode::green_dots_callback(const autoaim_interfaces::msg::GreenDot:
 {
   this->current_error = msg->d_pixel;
   // RCLCPP_INFO(this->get_logger(), "发送像素差: %.2f", current_error);
+  if(send_flag_){
+    send_command(current_error);
+    send_flag_ = false;
+  }
 }
 
 } 
