@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
 	<name>can_serial</name>
-	<version>0.0.0</version>
+	<version>0.0.1</version>
 	<description>CAN serial communication node for autoaim system</description>
 	<maintainer email="zllc@todo.todo">zllc</maintainer>
 	<license>Apache-2.0</license>

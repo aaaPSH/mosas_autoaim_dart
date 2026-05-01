@@ -1,4 +1,4 @@
-SaveFrameNode:
+/save_frame_node:
   ros__parameters:
     # 基本配置
     save_path: "./recordings"  # 保存路径（程序同级目录）

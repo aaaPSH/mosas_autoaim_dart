@@ -1,4 +1,14 @@
+/**
+ * @file CanSerialCore.cpp
+ * @brief CAN 总线底层通信类实现
+ * @author zllc <zllc@todo.todo>
+ * @copyright Copyright (c) 2026 MOSAS Team
+ */
+
 #include "can_serial/CanSerialCore.hpp"
+
+namespace can_serial
+{
 
 CanSerial::CanSerial(const std::string & interface)
 : can_interface_(interface), stream_(io_service_)
@@ -11,24 +21,25 @@ CanSerial::~CanSerial()
   io_service_.stop();
   if (io_thread_.joinable()) {
     io_thread_.join();
-    std::cout << "Boost.Asio线程已停止" << std::endl;
+    std::cout << "Boost.Asio 线程已停止" << std::endl;
   }
 }
 
 void CanSerial::init()
 {
-  // Socket初始化， 创建CAN套接字
+  // 创建 CAN 套接字
   sock_ = socket(PF_CAN, SOCK_RAW, CAN_RAW);
   if (sock_ < 0) throw std::runtime_error("socket failed");
 
-  int loopback = 0;  // 本地回环模式
+  // 关闭本地回环模式
+  int loopback = 0;
   setsockopt(sock_, SOL_CAN_RAW, CAN_RAW_LOOPBACK, &loopback, sizeof(loopback));
 
-  // 启用CAN错误帧上报，接收硬件层总线错误
+  // 启用 CAN 错误帧上报，接收硬件层总线错误
   can_err_mask_t err_mask = CAN_ERR_MASK;
   setsockopt(sock_, SOL_CAN_RAW, CAN_RAW_ERR_FILTER, &err_mask, sizeof(err_mask));
 
-  // 绑定接口
+  // 绑定 CAN 接口
   ifreq ifr{};
   strncpy(ifr.ifr_name, can_interface_.c_str(), IFNAMSIZ);
   if (ioctl(sock_, SIOCGIFINDEX, &ifr) < 0)
@@ -40,7 +51,7 @@ void CanSerial::init()
   if (bind(sock_, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0)
     throw std::runtime_error("绑定失败: " + std::string(strerror(errno)));
 
-  // 分配到Boost流
+  // 将套接字分配给 Boost.Asio 流
   stream_.assign(sock_);
 }
 
@@ -90,9 +101,9 @@ bool CanSerial::is_interface_up()
 void CanSerial::start_io_service()
 {
   io_thread_ = std::thread([this]() {
-    std::cout << "启动Boost.Asio事件循环..." << std::endl;
-    io_service_.run();  // 阻塞，直到io_service_.stop()被调用
-    std::cout << "Boost.Asio事件循环已停止" << std::endl;
+    std::cout << "启动 Boost.Asio 事件循环..." << std::endl;
+    io_service_.run();
+    std::cout << "Boost.Asio 事件循环已停止" << std::endl;
   });
 }
 
@@ -106,4 +117,4 @@ void CanSerial::set_frame_callback(FrameCallback callback)
   frame_callback_ = std::move(callback);
 }
 
-//海楼
+}  // namespace can_serial

@@ -1,4 +1,4 @@
-hik_camera:
+/hik_camera:
   ros__parameters:
     camera_name: hik_camera
     exposure_time: 2000.0

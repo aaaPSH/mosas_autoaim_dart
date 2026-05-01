@@ -49,14 +49,14 @@ def generate_launch_description():
         composable_node_descriptions=[
             ComposableNode(
                 package="hik_publisher",
-                plugin="HikCameraNode",
+                plugin="hik_publisher::HikCameraNode",
                 name="hik_camera",
                 parameters=[camera_params_file],
                 extra_arguments=[{"use_intra_process_comms": True}],
             ),
             ComposableNode(
                 package="detect_base",
-                plugin="GreenDotDetectNode",
+                plugin="detect_base::GreenDotDetectNode",
                 name="green_dot_detect_node",
                 parameters=[detector_params_file],
                 extra_arguments=[{"use_intra_process_comms": True}],
@@ -70,7 +70,7 @@ def generate_launch_description():
             ComposableNode(
                 package="save_frame",
                 plugin="save_frame::SaveFrameNode",
-                name="SaveFrameNode",
+                name="save_frame_node",
                 parameters=[save_frame_params_file],
                 extra_arguments=[{"use_intra_process_comms": True}],
             ),

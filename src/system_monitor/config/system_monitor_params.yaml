@@ -1,9 +1,0 @@
-# system_monitor 节点参数配置
-/system_monitor_node:
-  ros__parameters:
-    # 日志文件保存目录（每次启动自动创建带时间戳的文件）
-    log_path: "./logs"
-    # 状态检查间隔（毫秒），每隔多久检查一次状态并写入日志
-    check_interval_ms: 1000
-    # CAN通信超时时间（毫秒），超过此时间未收到CAN帧则认为离线
-    can_timeout_ms: 2000
