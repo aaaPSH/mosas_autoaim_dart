@@ -64,8 +64,9 @@ bool GreenDotDetect::detect(const cv::Mat & raw_image, std::vector<Dot> & dots, 
   // 安全性：确保高度为偶数，防止 ptr(y+1) 越界
   if (h % 2 != 0) h -= 1;
 
-  // 底图分辨率是 Raw 的一半
-  cv::Mat half_green = cv::Mat::zeros(h / 2, w / 2, CV_8UC1);
+  // 底图分辨率是 Raw 的一半，复用成员缓存避免每帧分配
+  half_green.create(h / 2, w / 2, CV_8UC1);
+  half_green.setTo(cv::Scalar(0));
 
   // 快速提取绿色通道能量 (BayerRG 格式下，偶数行是 R G，奇数行是 G B)
   // 这里取相邻两行的 G 分量平均值作为该点的亮度
@@ -84,7 +85,6 @@ bool GreenDotDetect::detect(const cv::Mat & raw_image, std::vector<Dot> & dots, 
   double fy_half = cameraMatrix.at<double>(1, 1) / 2.0;  // 半分辨率下的垂直焦距 (像素)
   double fx_half = cameraMatrix.at<double>(0, 0) / 2.0;  // 半分辨率下的水平焦距 (像素)
   double cy_half = cameraMatrix.at<double>(1, 2) / 2.0;  // 半分辨率下的垂直光心 (像素)
-  double cx_half = cameraMatrix.at<double>(0, 2) / 2.0;  // 半分辨率下的水平光心 (像素)
 
   // 高度差 (毫米)
   double delta_h = params.target_height - params.camera_height;
@@ -97,7 +97,7 @@ bool GreenDotDetect::detect(const cv::Mat & raw_image, std::vector<Dot> & dots, 
 
   // 搜索宽度计算：像素宽度 = 像素焦距 × tan(搜索角度)
   double search_w = std::abs(fx_half * std::tan(TO_RADIAN(params.detect_scale)));
-  double expected_x = cx_half;
+  double expected_x = params.calibrated_pixel_x / 2.0;
 
   int roi_y = static_cast<int>(expected_y - params.search_strip_min_h / 2);
   int roi_x = static_cast<int>(expected_x - search_w);
@@ -116,12 +116,12 @@ bool GreenDotDetect::detect(const cv::Mat & raw_image, std::vector<Dot> & dots, 
   cv::Mat roi_img = half_green(strip_roi);//在半分辨率图上地搜索条带
 
   // --- 步骤 3: 预处理 (二值化 + 膨胀) ---
-  cv::Mat mask;
-  cv::threshold(roi_img, mask, params.v_low, 255, cv::THRESH_BINARY);
-  cv::dilate(mask, mask, cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(3, 3)));
+  if (mask_.size() != roi_img.size()) mask_.create(roi_img.size(), CV_8UC1);
+  cv::threshold(roi_img, mask_, params.v_low, 255, cv::THRESH_BINARY);
+  cv::dilate(mask_, mask_, cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(3, 3)));
 
   std::vector<std::vector<cv::Point>> contours;
-  cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+  cv::findContours(mask_, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
   // ==========================================
   // Visual Setup: 准备全图画布和 Chip 容器
@@ -264,8 +264,6 @@ bool GreenDotDetect::detect(const cv::Mat & raw_image, std::vector<Dot> & dots, 
       srcPoints, dstPoints, cameraMatrix, distCoeffs, cv::noArray(), cameraMatrix);
 
     dot.center = dstPoints[0];
-    dot.roi = cv::Rect((strip_roi.x + r.x) * 2, (strip_roi.y + r.y) * 2, r.width * 2, r.height * 2);
-    dot.area = area * 4;
     dots.push_back(dot);
 
     // [Debug] 绘制成功结果 & 制作放大图
@@ -358,14 +356,14 @@ bool GreenDotDetect::detect(const cv::Mat & raw_image, std::vector<Dot> & dots, 
     // ------------------------------------------------------------------
     // 窗口 2: ROI Binary Mask (独立窗口，放大显示)
     // ------------------------------------------------------------------
-    if (!mask.empty()) {
+    if (!mask_.empty()) {
       cv::Mat mask_display;
 
       // 放大倍数 (例如放大 3 倍，看着更清楚)
       double scale_factor = 3.0;
 
       // 使用 INTER_NEAREST 保持二值图的边缘锐利，不模糊
-      cv::resize(mask, mask_display, cv::Size(), scale_factor, scale_factor, cv::INTER_NEAREST);
+      cv::resize(mask_, mask_display, cv::Size(), scale_factor, scale_factor, cv::INTER_NEAREST);
 
       // 在图上写字提示
       cv::putText(

@@ -19,7 +19,7 @@ struct DetectParams
   double target_height = 600.0;  // 目标离地高度 (mm)
   double camera_height = 0.0;    // 相机离地高度 (mm)
   double distance = 25000.0;     // 预估距离 (mm) - 25米
-  double detect_scale = 10.0;    // 搜索条带的垂直视场角范围 (度)
+  double detect_scale = 10.0;    // 搜索条带水平半视场角 (度), 总水平搜索角为 2*detect_scale
   int search_strip_min_h = 50;   // 搜索条带最小像素高度 (防止过窄)
 
   // --- 阈值与形态学 ---
@@ -87,8 +87,9 @@ private:
   cv::Mat distCoeffs;
   DetectParams params;
 
-  // --- 内存复用缓存 (优化性能) ---
-  cv::Mat half_green;  // 用于存储降维后的绿色通道
+  // --- 内存复用缓存 (零拷贝优化) ---
+  cv::Mat half_green;
+  cv::Mat mask_;
 
   // --- 内部辅助函数 ---
   /**

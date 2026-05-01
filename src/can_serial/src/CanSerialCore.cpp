@@ -24,6 +24,10 @@ void CanSerial::init()
   int loopback = 0;  // 本地回环模式
   setsockopt(sock_, SOL_CAN_RAW, CAN_RAW_LOOPBACK, &loopback, sizeof(loopback));
 
+  // 启用CAN错误帧上报，接收硬件层总线错误
+  can_err_mask_t err_mask = CAN_ERR_MASK;
+  setsockopt(sock_, SOL_CAN_RAW, CAN_RAW_ERR_FILTER, &err_mask, sizeof(err_mask));
+
   // 绑定接口
   ifreq ifr{};
   strncpy(ifr.ifr_name, can_interface_.c_str(), IFNAMSIZ);
@@ -50,11 +54,37 @@ void CanSerial::async_read()
 void CanSerial::handle_received(const boost::system::error_code & ec, size_t bytes)
 {
   if (!ec && bytes == sizeof(can_frame)) {
+    if (recv_frame_.can_id & CAN_ERR_FLAG) {
+      handle_error_frame(recv_frame_);
+      async_read();
+      return;
+    }
     if (frame_callback_) frame_callback_(recv_frame_);
     async_read();
   } else if (ec) {
+    if (ec.value() == ENODEV || ec.value() == ENETDOWN) {
+      controller_state_ = 4;
+    }
     std::cout << "读取错误: " << ec.message() << std::endl;
   }
+}
+
+void CanSerial::handle_error_frame(const can_frame & frame)
+{
+  if (frame.can_id & CAN_ERR_CRTL) {
+    controller_state_ = frame.data[1];
+  }
+  if (frame.can_id & CAN_ERR_BUSOFF) {
+    controller_state_ = 3;
+  }
+}
+
+bool CanSerial::is_interface_up()
+{
+  struct ifreq ifr{};
+  strncpy(ifr.ifr_name, can_interface_.c_str(), IFNAMSIZ);
+  if (ioctl(sock_, SIOCGIFFLAGS, &ifr) < 0) return false;
+  return (ifr.ifr_flags & IFF_UP) && (ifr.ifr_flags & IFF_RUNNING);
 }
 
 void CanSerial::start_io_service()

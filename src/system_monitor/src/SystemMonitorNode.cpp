@@ -20,11 +20,11 @@ SystemMonitorNode::SystemMonitorNode(const rclcpp::NodeOptions & options)
   can_timeout_ms_ = this->declare_parameter("can_timeout_ms", 2000);
 
   // 初始化状态
-  can_status_ = "UNKNOWN";
+  last_can_hw_state_ = 0;
   green_dot_detected_ = false;
   green_dot_x_ = 0.0;
   green_dot_y_ = 0.0;
-  can_status_received_ = false;
+  can_hw_state_received_ = false;
   green_dot_received_ = false;
 
   // 生成带时间戳的日志文件名
@@ -46,11 +46,11 @@ SystemMonitorNode::SystemMonitorNode(const rclcpp::NodeOptions & options)
     std::bind(&SystemMonitorNode::greenDotCallback, this, std::placeholders::_1));
   RCLCPP_INFO(this->get_logger(), "Subscribed to /detections/green_dots");
 
-  // 订阅CAN状态话题
-  can_status_sub_ = this->create_subscription<std_msgs::msg::String>(
-    "/can_status", rclcpp::SensorDataQoS(),
-    std::bind(&SystemMonitorNode::canStatusCallback, this, std::placeholders::_1));
-  RCLCPP_INFO(this->get_logger(), "Subscribed to /can_status");
+  // 订阅CAN硬件状态话题
+  can_hw_state_sub_ = this->create_subscription<std_msgs::msg::UInt8>(
+    "/can_hardware_state", 10,
+    std::bind(&SystemMonitorNode::canHwStateCallback, this, std::placeholders::_1));
+  RCLCPP_INFO(this->get_logger(), "Subscribed to /can_hardware_state");
 
   // 创建定时器，定期检查状态并写入日志
   timer_ = this->create_wall_timer(
@@ -86,25 +86,25 @@ void SystemMonitorNode::greenDotCallback(const autoaim_interfaces::msg::GreenDot
   }
 }
 
-void SystemMonitorNode::canStatusCallback(const std_msgs::msg::String::SharedPtr msg)
+void SystemMonitorNode::canHwStateCallback(const std_msgs::msg::UInt8::SharedPtr msg)
 {
-  can_status_received_ = true;
-  last_can_msg_time_ = this->now();
-  can_status_ = msg->data;
+  can_hw_state_received_ = true;
+  last_can_hw_state_time_ = this->now();
+  last_can_hw_state_ = msg->data;
 }
 
 void SystemMonitorNode::timerCallback()
 {
-  // 检查CAN超时
-  if (can_status_received_) {
+  // 检查CAN硬件状态超时（如果超过can_timeout_ms_没有收到状态更新，认为CanSerialNode挂了）
+  if (can_hw_state_received_) {
     auto now = this->now();
-    auto elapsed_ms = (now - last_can_msg_time_).seconds() * 1000.0;
+    auto elapsed_ms = (now - last_can_hw_state_time_).seconds() * 1000.0;
     if (elapsed_ms > can_timeout_ms_) {
-      can_status_ = "OFFLINE";
+      last_can_hw_state_ = 255;  // 自定义：超时未更新
     }
   }
 
-  // 检查绿灯检测超时（如果超过2秒没有收到检测消息，认为丢失）
+  // 检查绿灯检测超时
   if (green_dot_received_) {
     auto now = this->now();
     auto elapsed_ms = (now - last_green_dot_time_).seconds() * 1000.0;
@@ -119,7 +119,15 @@ void SystemMonitorNode::timerCallback()
 
 void SystemMonitorNode::checkAndWriteLog()
 {
-  // 构建状态字符串
+  // 构建CAN状态字符串
+  std::string can_status_str;
+  if (can_hw_state_received_) {
+    can_status_str = hwStateToString(last_can_hw_state_);
+  } else {
+    can_status_str = "NO_DATA";
+  }
+
+  // 构建绿灯状态字符串
   std::string green_dot_status;
   if (!green_dot_received_) {
     green_dot_status = "NO_DATA";
@@ -132,13 +140,26 @@ void SystemMonitorNode::checkAndWriteLog()
     green_dot_status = "LOST";
   }
 
-  std::string log_message = "CAN: " + can_status_ + " | GREEN_DOT: " + green_dot_status;
+  std::string log_message = "CAN: " + can_status_str + " | GREEN_DOT: " + green_dot_status;
 
   // 写入日志
   writeLog(log_message);
 
   // 同时输出到ROS日志
   RCLCPP_INFO(this->get_logger(), "%s", log_message.c_str());
+}
+
+std::string SystemMonitorNode::hwStateToString(uint8_t state)
+{
+  switch (state) {
+    case 0:   return "ONLINE";
+    case 1:   return "WARNING";
+    case 2:   return "PASSIVE";
+    case 3:   return "BUS_OFF";
+    case 4:   return "IF_DOWN";
+    case 255: return "TIMEOUT";
+    default:  return "UNKNOWN";
+  }
 }
 
 std::string SystemMonitorNode::generateLogFilename()

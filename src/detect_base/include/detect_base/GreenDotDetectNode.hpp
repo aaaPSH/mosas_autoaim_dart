@@ -37,6 +37,8 @@ private:
   double save_fps_ = 60.0;
   std::chrono::milliseconds save_interval_{1000 / 60};
 
+  // 保存路径
+  std::string save_path_ = "/home/nvidia/saved_green_dots";
 
   // 调试开关
   bool debug_mode_ = false;
@@ -86,6 +88,7 @@ public:
     this->declare_parameter("debug_mode", true);
     this->declare_parameter("save_images", false);
     this->declare_parameter("save_fps", 60.0);
+    this->declare_parameter("save_path", save_path_);
 
     // 阈值与形态
     this->declare_parameter("detect.v_low", 100);
@@ -143,17 +146,13 @@ public:
 private:
   void save_image_to_disk(const cv::Mat & image)
   {
-      cv::Mat save_img = image.clone();
-      
-      // 1. 定义基础保存目录
-      std::string base_dir = "/home/nvidia/saved_green_dots";
-
-      // 2. 按节点启动时间创建子目录（只在第一次创建）
-      static std::string save_dir = []() {
+      // 1. 按节点启动时间创建子目录（只在第一次创建）
+      std::string base_path = save_path_;
+      static std::string save_dir = [base_path]() {
           auto now = std::chrono::system_clock::now();
           auto time_t = std::chrono::system_clock::to_time_t(now);
           std::stringstream ss;
-          ss << "/home/nvidia/saved_green_dots/"
+          ss << base_path << "/"
              << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S");
           std::string dir = ss.str();
           std::filesystem::create_directories(dir);
@@ -165,15 +164,13 @@ private:
       std::time_t t = std::chrono::system_clock::to_time_t(now);
 
       std::stringstream ss;
-      ss << save_dir << "/DOT_" 
-        << std::put_time(std::localtime(&t), "%Y%m%d_%H%M%S") << "_" 
+      ss << save_dir << "/DOT_"
+        << std::put_time(std::localtime(&t), "%Y%m%d_%H%M%S") << "_"
         << std::setfill('0') << std::setw(3) << ms.count() << ".jpg";
 
-      // 3. 写入并检查返回值
-      bool success = cv::imwrite(ss.str(), save_img);
+      // 2. 写入并检查返回值 (image 已由调用方 clone，无需再次拷贝)
+      bool success = cv::imwrite(ss.str(), image);
       if (!success) {
-          // 如果还是失败（比如权限不足），至少你会知道
-          std::cerr << "Failed to save image to: " << ss.str() << std::endl;
           RCLCPP_ERROR(this->get_logger(), "Failed to save image to: %s", ss.str().c_str());
       }
   }
@@ -205,6 +202,7 @@ private:
     this->get_parameter("debug_mode", debug_mode_);
     this->get_parameter("save_images", save_images);
     this->get_parameter("save_fps", save_fps_);
+    this->get_parameter("save_path", save_path_);
     save_interval_ = std::chrono::milliseconds(static_cast<int>(1000.0 / save_fps_));
 
     // 读取算法参数
@@ -254,8 +252,18 @@ private:
       if (name == "debug_mode") {
         debug_mode_ = param.as_bool();
         RCLCPP_INFO(this->get_logger(), "Debug Mode Set: %d", debug_mode_);
+      } else if (name == "save_images") {
+        save_images = param.as_bool();
+        RCLCPP_INFO(this->get_logger(), "Save Images Set: %d", save_images);
+      } else if (name == "save_fps") {
+        save_fps_ = param.as_double();
+        save_interval_ = std::chrono::milliseconds(static_cast<int>(1000.0 / save_fps_));
+        RCLCPP_INFO(this->get_logger(), "Save FPS Set: %.1f", save_fps_);
+      } else if (name == "save_path") {
+        save_path_ = param.as_string();
+        RCLCPP_INFO(this->get_logger(), "Save Path Set: %s", save_path_.c_str());
       }
-      // 2. 算法参数匹配 (注意类型转换)
+      // 2. 算法参数匹配 
       else if (name == "detect.v_low") {
         p.v_low = param.as_int();
         algo_params_changed = true;
@@ -313,13 +321,14 @@ private:
   {
     cv::Mat raw_frame;
     try {
-      // 2. 格式转换
       if (
         msg->encoding.find("bayer") != std::string::npos ||
         msg->encoding == sensor_msgs::image_encodings::MONO8) {
-        raw_frame = cv_bridge::toCvShare(msg, msg->encoding)->image;
+        auto cv_ptr = cv_bridge::toCvShare(msg, msg->encoding);
+        raw_frame = cv_ptr->image;
       } else {
-        cv::Mat bgr = cv_bridge::toCvShare(msg, "bgr8")->image;
+        auto cv_ptr = cv_bridge::toCvShare(msg, "bgr8");
+        cv::Mat bgr = cv_ptr->image;
         std::vector<cv::Mat> chs;
         cv::split(bgr, chs);
         raw_frame = chs[1];  // Green Channel
@@ -384,7 +393,7 @@ private:
       target.d_pixel = target.x - p.calibrated_pixel_x;  // 使用校准的像素点x坐标计算像素差
 
       target_pub->publish(target);
-    } else if (!found) {
+    } else {
       // RCLCPP_INFO(this->get_logger(),"No Target!");
       autoaim_interfaces::msg::GreenDot target;
       target.header.stamp = msg->header.stamp;
@@ -396,15 +405,16 @@ private:
     }
 
     auto now = std::chrono::steady_clock::now();
-    fps_counter_++;
 
-    // 计算时间差 (秒)
-    auto fps_diff =
-      std::chrono::duration_cast<std::chrono::milliseconds>(now - last_fps_time_).count();
-    if (fps_diff >= 1000) {  // 超过1000ms
-      RCLCPP_INFO(this->get_logger(), "FPS: %d", fps_counter_);
-      fps_counter_ = 0;
-      last_fps_time_ = now;
+    if (debug_mode_) {
+      fps_counter_++;
+      auto fps_diff =
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_fps_time_).count();
+      if (fps_diff >= 1000) {
+        RCLCPP_INFO(this->get_logger(), "FPS: %d", fps_counter_);
+        fps_counter_ = 0;
+        last_fps_time_ = now;
+      }
     }
 
     auto save_diff =
@@ -412,6 +422,7 @@ private:
     if (save_images && save_diff >= save_interval_.count()) {
       {
         std::lock_guard<std::mutex> lock(save_mutex_);
+        if (save_queue_.size() >= 30) save_queue_.pop();
         save_queue_.push(raw_frame.clone());
       }
       save_cv_.notify_one();

@@ -13,3 +13,4 @@ Makefile
 *.out
 docker/
 COLCON_IGNORE
+docker-compose.yml

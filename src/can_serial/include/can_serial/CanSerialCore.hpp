@@ -3,6 +3,7 @@
 
 #include <bits/stdc++.h>
 #include <linux/can.h>
+#include <linux/can/error.h>
 #include <linux/can/netlink.h>
 #include <linux/can/raw.h>
 #include <linux/sockios.h>
@@ -29,10 +30,16 @@ public:
   void start_io_service();
   void send_frame(const can_frame & frame);
   void set_frame_callback(FrameCallback callback);
+
+  // CAN 硬件状态查询
+  bool is_interface_up();
+  int get_controller_state() const { return controller_state_; }
+
   std::thread io_thread_;
 
 private:
   void handle_received(const boost::system::error_code & ec, size_t bytes);
+  void handle_error_frame(const can_frame & frame);
 
   std::string can_interface_;
   int sock_ = -1;
@@ -40,6 +47,9 @@ private:
   boost::asio::posix::basic_stream_descriptor<> stream_;
   can_frame recv_frame_;
   FrameCallback frame_callback_;
+
+  // 0=ACTIVE, 1=WARNING, 2=PASSIVE, 3=BUS_OFF, 4=INTERFACE_DOWN
+  int controller_state_ = 0;
 };
 
 #endif

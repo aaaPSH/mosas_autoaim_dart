@@ -1,11 +1,9 @@
 #include <algorithm>
-#include <image_transport/image_transport.hpp>
 #include <iostream>
 #include <thread>
 #include <vector>
 
 #include "MvCameraControl.h"
-#include "camera_info_manager/camera_info_manager.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/image_encodings.hpp"
 #include "sensor_msgs/msg/image.hpp"
@@ -13,19 +11,15 @@
 class HikCameraNode : public rclcpp::Node
 {
 private:
-  // --- Raw 数据发布器 (给算法) ---
-  sensor_msgs::msg::Image raw_msg_;
-  image_transport::CameraPublisher raw_pub_;
+  // --- Raw data publisher (zero-copy via loaned messages) ---
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr raw_pub_;
 
-  // --- RGB 数据发布器 (给人类/可视化) ---
+  // --- RGB recording publisher ---
   sensor_msgs::msg::Image rgb_msg_;
-  image_transport::CameraPublisher rgb_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr save_pub_;
 
-  sensor_msgs::msg::CameraInfo camera_info_msg_;
-
-  std::array<double, 9> camera_matrix_;
-  std::vector<double> distortion_coeff_;
-  std::string distortion_model_;
+  // Raw buffer for RGB conversion (copy before freeing SDK buffer)
+  std::vector<uint8_t> raw_buffer_;
 
   OnSetParametersCallbackHandle::SharedPtr params_callback_handle_;
 
@@ -36,15 +30,15 @@ private:
   MV_CC_PIXEL_CONVERT_PARAM ConvertParam_;
   void * camera_handle_;
 
-  // 内录抽帧
-  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr record_pub_;
+  // Hardware timestamp
+  uint64_t tick_freq_hz_ = 1000000000;  // 1 tick = 1ns (GigE Vision default)
 
 public:
   explicit HikCameraNode(const rclcpp::NodeOptions & options) : Node("hik_camera", options)
   {
-    RCLCPP_INFO(this->get_logger(), "Starting HikCameraNode (Dual Stream: Raw + RGB)!");
+    RCLCPP_INFO(this->get_logger(), "Starting HikCameraNode!");
 
-    // 1. 枚举与打开设备
+    // 1. Enumerate and open device
     MV_CC_DEVICE_INFO_LIST DeviceList;
     nRet = MV_CC_EnumDevices(MV_USB_DEVICE | MV_GIGE_DEVICE, &DeviceList);
     while (DeviceList.nDeviceNum == 0 && rclcpp::ok()) {
@@ -55,57 +49,47 @@ public:
     MV_CC_CreateHandle(&camera_handle_, DeviceList.pDeviceInfo[0]);
     MV_CC_OpenDevice(camera_handle_);
 
-    // 2. 【关键】强制设置输出格式为 BayerRG8
-    // 这是双流的基础：相机必须吐出 Raw，我们才能同时拥有 Raw 和转换后的 RGB
+    // 2. Force BayerRG8 output
     int tempRet = MV_CC_SetEnumValue(camera_handle_, "PixelFormat", PixelType_Gvsp_BayerRG8);
     if (tempRet != MV_OK) {
-      RCLCPP_WARN(
-        this->get_logger(),
-        "Warning: Failed to set PixelFormat to BayerRG8. Dual stream might fail.");
+      RCLCPP_WARN(this->get_logger(), "Failed to set PixelFormat to BayerRG8.");
     }
 
     MV_CC_GetImageInfo(camera_handle_, &img_info_);
 
-    // 3. 初始化转换参数 (用于生成 /image_color)
+    // 3. Query device timestamp tick frequency
+    MVCC_INTVALUE tick_freq;
+    if (MV_CC_GetIntValue(camera_handle_, "DeviceTimestampTickFrequency", &tick_freq) == MV_OK &&
+        tick_freq.nCurValue > 0) {
+      tick_freq_hz_ = tick_freq.nCurValue;
+      RCLCPP_INFO(this->get_logger(), "Timestamp tick frequency: %lu Hz", tick_freq_hz_);
+    } else {
+      tick_freq_hz_ = 1000000000;  // GigE Vision: 1 tick = 1 ns
+      RCLCPP_INFO(this->get_logger(), "Using default tick frequency: 1 ns/tick");
+    }
+
+    // 4. Pre-allocate buffers (once, never resized in hot path)
+    size_t raw_size = img_info_.nHeightMax * img_info_.nWidthMax;
+    raw_buffer_.resize(raw_size);
+    rgb_msg_.data.resize(raw_size * 3);
+
+    // Init conversion params
     ConvertParam_.nWidth = img_info_.nWidthMax;
     ConvertParam_.nHeight = img_info_.nHeightMax;
-    // 目标格式：RGB8
     ConvertParam_.enDstPixelType = PixelType_Gvsp_RGB8_Packed;
 
-    // 4. 初始化发布者
-    bool use_sensor_data_qos = this->declare_parameter("use_sensor_data_qos", false);
-    auto qos = use_sensor_data_qos ? rmw_qos_profile_sensor_data : rmw_qos_profile_default;
+    // 5. Publishers
+    raw_pub_ = this->create_publisher<sensor_msgs::msg::Image>(
+        "/image_raw", rclcpp::SensorDataQoS());
 
-    // 话题 1: /image_raw (发布 Bayer Raw，给算法用)
-    raw_pub_ = image_transport::create_camera_publisher(this, "/image_raw", qos);
-
-    // 话题 2: /image_color (发布 RGB，给 RQT 用)
-    rgb_pub_ = image_transport::create_camera_publisher(this, "/image_color", qos);
-
-    record_pub_ =
-      this->create_publisher<sensor_msgs::msg::Image>("/save_frame", rclcpp::SensorDataQoS());
+    save_pub_ = this->create_publisher<sensor_msgs::msg::Image>(
+        "/save_frame", rclcpp::SensorDataQoS());
 
     declareParams();
     MV_CC_StartGrabbing(camera_handle_);
 
-    // 加载内参 (假设内参对 raw 和 color 都是通用的)
-    auto camera_matrix_vector_ = this->declare_parameter<std::vector<double>>(
-      "camera_matrix", {2358.125070, 0.000000, 743.213621, 0.000000, 2357.300407, 563.210311,
-                        0.000000, 0.000000, 1.000000});
-    if (camera_matrix_vector_.size() == 9) {
-      std::copy(camera_matrix_vector_.begin(), camera_matrix_vector_.end(), camera_matrix_.begin());
-    }
-
-    distortion_model_ = this->declare_parameter("distortion_model", "plumb_bob");
-    distortion_coeff_ = this->declare_parameter<std::vector<double>>(
-      "distortion_coeff", {-0.083754, 0.222157, 0.000000, 0.000000, 0.109514});
-
-    camera_info_msg_.k = camera_matrix_;
-    camera_info_msg_.distortion_model = distortion_model_;
-    camera_info_msg_.d = distortion_coeff_;
-
     params_callback_handle_ = this->add_on_set_parameters_callback(
-      std::bind(&HikCameraNode::parametersCallback, this, std::placeholders::_1));
+        std::bind(&HikCameraNode::parametersCallback, this, std::placeholders::_1));
 
     capture_thread_ = std::thread(&HikCameraNode::captureLoop, this);
   }
@@ -125,14 +109,8 @@ public:
   {
     MV_FRAME_OUT OutFrame;
     int fail_count = 0;
-    int record_fps_control = 0;
-
-    // 预分配内存，避免循环内频繁 malloc
-    raw_msg_.data.reserve(img_info_.nHeightMax * img_info_.nWidthMax);
-    rgb_msg_.data.reserve(img_info_.nHeightMax * img_info_.nWidthMax * 3);
 
     MV_CC_SetEnumValue(camera_handle_, "TriggerMode", MV_TRIGGER_MODE_OFF);
-
     MV_CC_StartGrabbing(camera_handle_);
 
     while (rclcpp::ok()) {
@@ -140,15 +118,16 @@ public:
 
       if (nRet == MV_OK) {
         fail_count = 0;
-        rclcpp::Time stamp = this->now();
 
-        // ---------------------------------------------------------
-        // 步骤 1: 发布 Raw 图像 (/image_raw) -> 给算法
-        // ---------------------------------------------------------
-        std::string bayer_encoding = "";
+        // Hardware timestamp
+        uint64_t dev_ticks = OutFrame.stFrameInfo.nDevTimeStamp;
+        uint64_t dev_ns = dev_ticks * (1000000000ULL / tick_freq_hz_);
+        rclcpp::Time stamp(dev_ns, RCL_SYSTEM_TIME);
+
+        // Determine Bayer encoding
+        std::string bayer_encoding;
         bool is_bayer = true;
 
-        // 自动判断 Bayer 格式
         switch (OutFrame.stFrameInfo.enPixelType) {
           case PixelType_Gvsp_BayerRG8:
             bayer_encoding = sensor_msgs::image_encodings::BAYER_RGGB8;
@@ -167,58 +146,69 @@ public:
             break;
         }
 
+        uint32_t frame_len = OutFrame.stFrameInfo.nFrameLen;
+        uint32_t height = OutFrame.stFrameInfo.nHeight;
+        uint32_t width = OutFrame.stFrameInfo.nWidth;
+
+        bool need_rgb = save_pub_->get_subscription_count() > 0;
+
         if (is_bayer) {
-          raw_msg_.header.stamp = stamp;
-          raw_msg_.header.frame_id = "camera_optical_frame";
-          raw_msg_.encoding = bayer_encoding;
-          raw_msg_.height = OutFrame.stFrameInfo.nHeight;
-          raw_msg_.width = OutFrame.stFrameInfo.nWidth;
-          raw_msg_.step = OutFrame.stFrameInfo.nWidth;  // Raw 步长 = 宽
+          // Save raw copy for RGB conversion (before freeing SDK buffer)
+          if (need_rgb && frame_len <= raw_buffer_.size()) {
+            memcpy(raw_buffer_.data(), OutFrame.pBufAddr, frame_len);
+          }
 
-          // 零拷贝 (尽可能)
-          raw_msg_.data.resize(OutFrame.stFrameInfo.nFrameLen);
-          memcpy(raw_msg_.data.data(), OutFrame.pBufAddr, OutFrame.stFrameInfo.nFrameLen);
-
-          camera_info_msg_.header = raw_msg_.header;
-          raw_pub_.publish(raw_msg_, camera_info_msg_);
-        }
-
-        // ---------------------------------------------------------
-        // 步骤 2: 发布 RGB 图像 (/image_color) -> 给 RQT/人类
-        // ---------------------------------------------------------
-        // 只有当接收者有订阅时才转换，节省 CPU 资源 (Lazy publish)
-        if (rgb_pub_.getNumSubscribers() > 0 || record_pub_->get_subscription_count() > 0) {
-          rgb_msg_.header.stamp = stamp;
-          rgb_msg_.header.frame_id = "camera_optical_frame";
-          rgb_msg_.encoding = "rgb8";
-          rgb_msg_.height = OutFrame.stFrameInfo.nHeight;
-          rgb_msg_.width = OutFrame.stFrameInfo.nWidth;
-          rgb_msg_.step = OutFrame.stFrameInfo.nWidth * 3;
-          rgb_msg_.data.resize(rgb_msg_.height * rgb_msg_.step);
-
-          // 填充转换结构体
-          ConvertParam_.pDstBuffer = rgb_msg_.data.data();
-          ConvertParam_.nDstBufferSize = rgb_msg_.data.size();
-          ConvertParam_.pSrcData = OutFrame.pBufAddr;  // 源数据直接来自相机 buffer
-          ConvertParam_.nSrcDataLen = OutFrame.stFrameInfo.nFrameLen;
-          ConvertParam_.enSrcPixelType = OutFrame.stFrameInfo.enPixelType;
-
-          // 调用 SDK 进行去马赛克转换
-          MV_CC_ConvertPixelType(camera_handle_, &ConvertParam_);
-
-          rgb_pub_.publish(rgb_msg_, camera_info_msg_);
-
-          // 内录抽帧 (使用 RGB 图像)
-          record_fps_control++;
-          if (record_fps_control >= 7) {
-            record_pub_->publish(rgb_msg_);
-            record_fps_control = 0;
+          // Publish /image_raw — zero-copy via loaned message
+          auto loaned_msg = raw_pub_->borrow_loaned_message();
+          if (loaned_msg.is_valid()) {
+            auto & msg = loaned_msg.get();
+            msg.header.stamp = stamp;
+            msg.header.frame_id = "camera_optical_frame";
+            msg.encoding = bayer_encoding;
+            msg.height = height;
+            msg.width = width;
+            msg.step = width;
+            msg.data.resize(frame_len);
+            memcpy(msg.data.data(), OutFrame.pBufAddr, frame_len);
+            raw_pub_->publish(std::move(loaned_msg));
+          } else {
+            auto msg = std::make_unique<sensor_msgs::msg::Image>();
+            msg->header.stamp = stamp;
+            msg->header.frame_id = "camera_optical_frame";
+            msg->encoding = bayer_encoding;
+            msg->height = height;
+            msg->width = width;
+            msg->step = width;
+            msg->data.resize(frame_len);
+            memcpy(msg->data.data(), OutFrame.pBufAddr, frame_len);
+            raw_pub_->publish(std::move(msg));
           }
         }
 
+        // Free SDK buffer immediately — camera can start next exposure
         MV_CC_FreeImageBuffer(camera_handle_, &OutFrame);
+
+        // Publish /save_frame (from saved raw buffer)
+        if (need_rgb) {
+          rgb_msg_.header.stamp = stamp;
+          rgb_msg_.header.frame_id = "camera_optical_frame";
+          rgb_msg_.encoding = "rgb8";
+          rgb_msg_.height = height;
+          rgb_msg_.width = width;
+          rgb_msg_.step = width * 3;
+          rgb_msg_.data.resize(height * width * 3);
+
+          ConvertParam_.pDstBuffer = rgb_msg_.data.data();
+          ConvertParam_.nDstBufferSize = rgb_msg_.data.size();
+          ConvertParam_.pSrcData = raw_buffer_.data();
+          ConvertParam_.nSrcDataLen = frame_len;
+          ConvertParam_.enSrcPixelType = OutFrame.stFrameInfo.enPixelType;
+
+          MV_CC_ConvertPixelType(camera_handle_, &ConvertParam_);
+
+          save_pub_->publish(rgb_msg_);
+        }
       } else {
-        // 错误处理...
         fail_count++;
         if (fail_count >= 100) {
           RCLCPP_WARN(this->get_logger(), "Get buffer failed! Resetting...");
@@ -231,11 +221,8 @@ public:
     }
   }
 
-  // 参数声明与回调部分保持不变...
   void declareParams()
   {
-    // ... (与你原代码一致)
-    // 确保 TriggerMode 开启
     rcl_interfaces::msg::ParameterDescriptor param_desc;
     MVCC_FLOATVALUE fValue;
     param_desc.integer_range.resize(1);
@@ -263,7 +250,6 @@ public:
   rcl_interfaces::msg::SetParametersResult parametersCallback(
     const std::vector<rclcpp::Parameter> & parameters)
   {
-    // ... (与你原代码一致)
     rcl_interfaces::msg::SetParametersResult result;
     result.successful = true;
     for (const auto & param : parameters) {
