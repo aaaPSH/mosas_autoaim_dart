@@ -256,8 +256,8 @@ namespace save_frame
       auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_stat_time_).count();
       if (elapsed >= 5)
       {
-        double fps = static_cast<double>(frames_received_) / elapsed;
-        RCLCPP_INFO(this->get_logger(), "Image FPS: %.1f, Buffer size: %zu (filtered)", fps, message_buffer_.size());
+        // double fps = static_cast<double>(frames_received_) / elapsed;
+        // RCLCPP_INFO(this->get_logger(), "Image FPS: %.1f, Buffer size: %zu (filtered)", fps, message_buffer_.size());
         frames_received_ = 0;
         last_stat_time_ = now;
       }
@@ -277,8 +277,8 @@ namespace save_frame
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_stat_time_).count();
     if (elapsed >= 5)
     {
-      double fps = static_cast<double>(frames_received_) / elapsed;
-      RCLCPP_INFO(this->get_logger(), "Image FPS: %.1f, Buffer size: %zu", fps, message_buffer_.size());
+      // double fps = static_cast<double>(frames_received_) / elapsed;
+      // RCLCPP_INFO(this->get_logger(), "Image FPS: %.1f, Buffer size: %zu", fps, message_buffer_.size());
       frames_received_ = 0;
       last_stat_time_ = now;
     }
@@ -370,7 +370,7 @@ namespace save_frame
   void SaveFrameNode::gameStatusCallback(const std_msgs::msg::UInt8::SharedPtr msg)
   {
     uint8_t status = msg->data;
-    RCLCPP_INFO(this->get_logger(), "Received game status: %u", status);
+    // RCLCPP_INFO(this->get_logger(), "Received game status: %u", status);
 
     if (status == 4) // IN_GAME
     {

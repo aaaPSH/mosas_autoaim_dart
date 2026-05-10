@@ -4,7 +4,7 @@
     # 0. 基础设置
     # ==========================================
     # 调试模式：True 会显示 OpenCV 窗口和终端详细日志
-    debug_mode: false
+    debug_mode: true
     # 自动保存：检测到目标后是否保存图片到 ~/saved_green_dots
     save_images: false
     # 是否根据比赛阶段控制内录：true=仅比赛阶段(status==4)时内录，false=只要save_images为true就内录

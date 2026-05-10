@@ -63,6 +63,9 @@ private:
   /** @brief 发送探测帧（不受 calibrated 限制） */
   void send_probe();
 
+  /** @brief 延迟 CAN 初始化（一次性定时器回调） */
+  void deferred_can_init();
+
 
   // --- 订阅者与发布者 ---
   rclcpp::Subscription<autoaim_interfaces::msg::GreenDot>::SharedPtr green_dots_sub_;
@@ -73,6 +76,7 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::TimerBase::SharedPtr can_state_timer_;
   rclcpp::TimerBase::SharedPtr probe_timer_;
+  rclcpp::TimerBase::SharedPtr can_init_timer_;
 
   // --- CAN 通信 ---
   std::unique_ptr<CanSerial> can_core_;
@@ -112,6 +116,7 @@ private:
   {
     bool calibrated = false;
     GameStatus current_game_status = GameStatus::PRE_PREPARATION;
+    bool send_fire = false;
   } g_command_;
   
 

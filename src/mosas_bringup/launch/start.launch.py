@@ -21,8 +21,8 @@ def generate_launch_description():
         default=os.path.join(
             get_package_share_directory('mosas_bringup'),
             'config',
-            # 'base_detect.yaml'
-            'base_detect_test.yaml'
+            'base_detect.yaml'
+            # 'base_detect_test.yaml'
         )
     )
     system_monitor_params_file = LaunchConfiguration(
@@ -31,6 +31,14 @@ def generate_launch_description():
             get_package_share_directory('mosas_bringup'),
             'config',
             'system_monitor_params.yaml'
+        )
+    )
+    can_serial_params_file = LaunchConfiguration(
+        "can_serial_params_file",
+        default=os.path.join(
+            get_package_share_directory('mosas_bringup'),
+            'config',
+            'can_serial.yaml'
         )
     )
     save_frame_params_file = LaunchConfiguration(
@@ -65,6 +73,7 @@ def generate_launch_description():
                 package="can_serial",
                 plugin="can_serial::CanSerialNode",
                 name="can_serial_node",
+                parameters=[can_serial_params_file],
                 extra_arguments=[{"use_intra_process_comms": True}],
             ),
             ComposableNode(
@@ -90,5 +99,6 @@ def generate_launch_description():
         DeclareLaunchArgument("detector_params_file", default_value=detector_params_file),
         DeclareLaunchArgument("system_monitor_params_file", default_value=system_monitor_params_file),
         DeclareLaunchArgument("save_frame_params_file", default_value=save_frame_params_file),
+        DeclareLaunchArgument("can_serial_params_file", default_value=can_serial_params_file),
         container,
     ])

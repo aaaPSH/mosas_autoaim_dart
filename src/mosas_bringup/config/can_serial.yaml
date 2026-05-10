@@ -1,0 +1,7 @@
+/can_serial_node:
+  ros__parameters:
+    Kp: 0.7
+    Ki: 0.0
+    Kd: 0.0
+    max_speed: 100.0
+    deadzone: 0.5

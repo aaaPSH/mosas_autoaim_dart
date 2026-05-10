@@ -61,39 +61,57 @@ CanSerialNode::CanSerialNode(const rclcpp::NodeOptions & options)
   param_callback_handle_ = this->add_on_set_parameters_callback(
     std::bind(&CanSerialNode::parameters_callback, this, std::placeholders::_1));
 
-  // ================= [3. 初始化 CAN 驱动] =================
-  can_core_ = std::make_unique<CanSerial>("can0");
+  // ================= [3. 创建发布者] =================
+  can_hw_state_pub_ = this->create_publisher<std_msgs::msg::UInt8>("/can_hardware_state", 10);
+  game_status_pub_ = this->create_publisher<std_msgs::msg::UInt8>("/game_status", 10);
+
+  // ================= [4. 创建订阅者] =================
+  green_dots_sub_ = this->create_subscription<autoaim_interfaces::msg::GreenDot>(
+    "/detections/green_dots", rclcpp::SensorDataQoS(),
+    std::bind(&CanSerialNode::green_dots_callback, this, std::placeholders::_1));
+
+  // ================= [5. 延迟初始化 CAN 驱动] =================
+  // boot 时 executor 线程和 IO 线程可能冲突，延迟执行确保系统就绪
+  can_init_timer_ = this->create_wall_timer(
+      std::chrono::seconds(2),
+      std::bind(&CanSerialNode::deferred_can_init, this));
+}
+
+// ============================================================================
+// 延迟 CAN 初始化（一次性定时器回调）
+// ============================================================================
+
+void CanSerialNode::deferred_can_init()
+{
+  // 只执行一次，立即销毁定时器
+  can_init_timer_.reset();
+
   try {
+    can_core_ = std::make_unique<CanSerial>("can0");
     can_core_->init();
     can_core_->set_frame_callback(
       std::bind(&CanSerialNode::handle_can_frame, this, std::placeholders::_1));
     can_core_->async_read();
     can_core_->start_io_service();
-    std::cout << "Boost.Asio 线程已启动" << std::endl;
+    RCLCPP_INFO(get_logger(), "CAN 初始化完成");
   } catch (const std::exception & e) {
     RCLCPP_FATAL(get_logger(), "CAN 初始化失败: %s", e.what());
-    throw;
+    return;
   }
 
-  // 发布 CAN 硬件状态，每 500ms 上报一次
-  can_hw_state_pub_ = this->create_publisher<std_msgs::msg::UInt8>("/can_hardware_state", 10);
-  game_status_pub_ = this->create_publisher<std_msgs::msg::UInt8>("/game_status", 10);
+  // CAN 就绪后创建定时器
   can_state_timer_ = this->create_wall_timer(
       std::chrono::milliseconds(500),
       std::bind(&CanSerialNode::publish_can_hw_state, this));
 
-  // 探测帧定时器，不受 calibrated 限制，用于检测总线上是否有设备
   probe_timer_ = this->create_wall_timer(
       std::chrono::milliseconds(500),
       std::bind(&CanSerialNode::send_probe, this));
 
-  // 立即发布一次初始CAN硬件状态，确保SystemMonitorNode能尽快收到
+  // 立即发布一次初始状态
   publish_can_hw_state();
 
-  // ================= [4. 初始化订阅者] =================
-  green_dots_sub_ = this->create_subscription<autoaim_interfaces::msg::GreenDot>(
-    "/detections/green_dots", rclcpp::SensorDataQoS(),
-    std::bind(&CanSerialNode::green_dots_callback, this, std::placeholders::_1));
+  RCLCPP_INFO(get_logger(), "CanSerialNode 全部初始化完成");
 }
 
 // ============================================================================
@@ -149,6 +167,7 @@ void CanSerialNode::handle_can_frame(const can_frame & frame)
     std::lock_guard<std::mutex> lock(data_mutex_);
     this->g_command_.calibrated = frame.data[3];
     this->g_command_.current_game_status = static_cast<GameStatus>(frame.data[5]);
+    this->g_command_.send_fire = frame.data[7];
 
     auto msg = std_msgs::msg::UInt8();
     msg.data = frame.data[5];
@@ -164,10 +183,17 @@ void CanSerialNode::send_command()
 {
   std::lock_guard<std::mutex> lock(data_mutex_);
   int16_t speed_int = static_cast<int16_t>(this->s_command_.speed * SCALE);
+  
   frame_.data[0] = this->s_command_.detected;
   frame_.data[1] = (speed_int >> 8) & 0xFF;
   frame_.data[2] = speed_int & 0xFF;
-  frame_.data[4] = this->s_command_.can_shoot ? FIRE_ON : FIRE_OFF;
+  if(g_command_.send_fire){
+    frame_.data[4] = this->s_command_.can_shoot ? FIRE_ON : FIRE_OFF;
+    g_command_.send_fire = false;
+  }else{
+    frame_.data[4] = false;
+  }
+  
   try {
     if(this->g_command_.calibrated){
       can_core_->send_frame(frame_);
