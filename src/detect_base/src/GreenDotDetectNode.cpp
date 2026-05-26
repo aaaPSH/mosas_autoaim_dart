@@ -107,7 +107,7 @@ namespace detect_base
         });
 
     fire_count_sub_ = this->create_subscription<std_msgs::msg::UInt8>(
-        "/fire_count", 10(),
+        "/fire_count", 10,
         [this](const std_msgs::msg::UInt8::SharedPtr msg)
         {
           if (!fix_)

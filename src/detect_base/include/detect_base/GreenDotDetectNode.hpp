@@ -60,7 +60,7 @@ namespace detect_base
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sub_image_;
     rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr game_status_sub_;
     rclcpp::Publisher<autoaim_interfaces::msg::GreenDot>::SharedPtr target_pub_;
-    rclcpp::Subscriber<std_msgs::msg::UInt8>::SharedPtr fire_count_sub_;
+    rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr fire_count_sub_;
 
     // --- 比赛状态 ---
     std::atomic<bool> game_started_{false};
