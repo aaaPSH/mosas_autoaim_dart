@@ -168,6 +168,7 @@ void CanSerialNode::handle_can_frame(const can_frame & frame)
     this->g_command_.calibrated = frame.data[3];
     this->g_command_.current_game_status = static_cast<GameStatus>(frame.data[5]);
     this->g_command_.send_fire = frame.data[7];
+    RCLCPP_INFO(this->get_logger(),"比赛阶段:%d",frame.data[5]);
 
     auto msg = std_msgs::msg::UInt8();
     msg.data = frame.data[5];
@@ -187,7 +188,7 @@ void CanSerialNode::send_command()
   frame_.data[0] = this->s_command_.detected;
   frame_.data[1] = (speed_int >> 8) & 0xFF;
   frame_.data[2] = speed_int & 0xFF;
-  if(g_command_.send_fire){
+  if(g_command_.send_fire && g_command_.current_game_status == GameStatus::IN_GAME){
     frame_.data[4] = this->s_command_.can_shoot ? FIRE_ON : FIRE_OFF;
     g_command_.send_fire = false;
   }else{
