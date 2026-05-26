@@ -64,6 +64,7 @@ CanSerialNode::CanSerialNode(const rclcpp::NodeOptions & options)
   // ================= [3. 创建发布者] =================
   can_hw_state_pub_ = this->create_publisher<std_msgs::msg::UInt8>("/can_hardware_state", 10);
   game_status_pub_ = this->create_publisher<std_msgs::msg::UInt8>("/game_status", 10);
+  fire_count_pub_ = this->create_publisher<std_msgs::msg::UInt8>("/fire_count", 10);
 
   // ================= [4. 创建订阅者] =================
   green_dots_sub_ = this->create_subscription<autoaim_interfaces::msg::GreenDot>(
@@ -167,12 +168,16 @@ void CanSerialNode::handle_can_frame(const can_frame & frame)
     std::lock_guard<std::mutex> lock(data_mutex_);
     this->g_command_.calibrated = frame.data[3];
     this->g_command_.current_game_status = static_cast<GameStatus>(frame.data[5]);
+    this->g_command_.fire_count = frame.data[6];
     this->g_command_.send_fire = frame.data[7];
-    RCLCPP_INFO(this->get_logger(),"比赛阶段:%d",frame.data[5]);
 
     auto msg = std_msgs::msg::UInt8();
     msg.data = frame.data[5];
     game_status_pub_->publish(msg);
+
+    auto fire_msg = std_msgs::msg::UInt8();
+    fire_msg.data = frame.data[6];
+    fire_count_pub_->publish(fire_msg);
   }
 }
 

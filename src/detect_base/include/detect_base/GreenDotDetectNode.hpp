@@ -60,6 +60,7 @@ namespace detect_base
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sub_image_;
     rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr game_status_sub_;
     rclcpp::Publisher<autoaim_interfaces::msg::GreenDot>::SharedPtr target_pub_;
+    rclcpp::Subscriber<std_msgs::msg::UInt8>::SharedPtr fire_count_sub_;
 
     // --- 比赛状态 ---
     std::atomic<bool> game_started_{false};
@@ -76,6 +77,12 @@ namespace detect_base
 
     // --- 检测参数 ---
     DetectParams detect_params_;
+    double calibrated_pixel_x_ = 0.0;
+    double pixel_ = 0.0;
+    bool fix_ = false; 
+
+     // --- 当前火力值 ---
+    
 
     // --- FPS 统计 ---
     int fps_counter_ = 0;

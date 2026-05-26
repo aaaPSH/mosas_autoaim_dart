@@ -79,6 +79,8 @@ namespace detect_base
     this->declare_parameter("detect.distance", 25000.0);
 
     this->declare_parameter("detect.calibrated_pixel_x", 0.0);
+    this->declare_parameter("detect.fix", true);
+    this->declare_parameter("detect.pixel", 3.0);
 
     // 首次同步参数
     refreshParams();
@@ -98,10 +100,42 @@ namespace detect_base
 
     // 订阅比赛状态
     game_status_sub_ = this->create_subscription<std_msgs::msg::UInt8>(
-        "/game_status", rclcpp::SensorDataQoS(),
+        "/game_status", 10,
         [this](const std_msgs::msg::UInt8::SharedPtr msg)
         {
           if (use_game_status_) game_started_.store(msg->data == 4);
+        });
+
+    fire_count_sub_ = this->create_subscription<std_msgs::msg::UInt8>(
+        "/fire_count", 10(),
+        [this](const std_msgs::msg::UInt8::SharedPtr msg)
+        {
+          if (!fix_)
+          {
+            switch (msg->data)
+            {
+            case 0:
+              this->detect_params_.calibrated_pixel_x = this->calibrated_pixel_x_;
+              detector_->update_params(this->detect_params_);
+              break;
+            case 1:
+              this->detect_params_.calibrated_pixel_x = this->calibrated_pixel_x_-this->pixel_;
+              detector_->update_params(this->detect_params_);
+              break;
+            case 2:
+              this->detect_params_.calibrated_pixel_x = this->calibrated_pixel_x_+this->pixel_;
+              detector_->update_params(this->detect_params_);
+              break;
+            case 3:
+              this->detect_params_.calibrated_pixel_x = this->calibrated_pixel_x_+2*this->pixel_;
+              detector_->update_params(this->detect_params_);
+              break;
+            default:
+              this->detect_params_.calibrated_pixel_x = this->calibrated_pixel_x_;
+              detector_->update_params(this->detect_params_);
+              break;
+            }
+          }
         });
 
     target_pub_ = this->create_publisher<autoaim_interfaces::msg::GreenDot>(
@@ -153,7 +187,10 @@ namespace detect_base
     this->get_parameter("detect.detect_scale", detect_params_.detect_scale);
     this->get_parameter("detect.distance", detect_params_.distance);
 
-    this->get_parameter("detect.calibrated_pixel_x", detect_params_.calibrated_pixel_x);
+    this->get_parameter("detect.calibrated_pixel_x", calibrated_pixel_x_);
+    this->detect_params_.calibrated_pixel_x = calibrated_pixel_x_;
+    this->get_parameter("detect.pixel", pixel_);
+    this->get_parameter("detect.fix", fix_);
 
     // 更新算法内部状态
     detector_->update_params(detect_params_);

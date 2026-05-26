@@ -71,6 +71,7 @@ private:
   rclcpp::Subscription<autoaim_interfaces::msg::GreenDot>::SharedPtr green_dots_sub_;
   rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr can_hw_state_pub_;
   rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr game_status_pub_;
+  rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr fire_count_pub_;
 
   // --- 定时器 ---
   rclcpp::TimerBase::SharedPtr timer_;
@@ -117,6 +118,7 @@ private:
     bool calibrated = false;
     GameStatus current_game_status = GameStatus::PRE_PREPARATION;
     bool send_fire = false;
+    uint8_t fire_count = 0;
   } g_command_;
   
 
