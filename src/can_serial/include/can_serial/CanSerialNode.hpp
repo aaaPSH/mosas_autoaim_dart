@@ -139,7 +139,7 @@ private:
 
   // --- 容错参数 ---
   static constexpr int MAX_LOST_TOLERANCE = 5;
-  static constexpr size_t VERIFY_FRAMES = 5;
+  static constexpr size_t VERIFY_FRAMES = 200;
 
   // --- PID 控制器 ---
   ScrewPID my_pid_{0.8, 0.1, 0.05, 5.0, 100.0};
